@@ -3,7 +3,7 @@ import json
 import requests
 import logging
 from pathlib import Path
-from config import TTS_URL,VIDEO_URL
+from config import TTS_URL, VIDEO_URL
 
 logger = logging.getLogger(__name__)
 
@@ -24,21 +24,40 @@ class AudioService:
     def train_voice_model(self, audio_path):
         """训练语音模型"""
         try:
+            # 确保音频文件存在
+            if not os.path.exists(audio_path):
+                raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
             # 准备训练参数
             data = {
-                "format": ".wav",
+                "format": "wav",  # 修改为wav而不是.wav
                 "reference_audio": str(audio_path),
                 "lang": "zh"
             }
 
+            logger.info(f"Sending training request with data: {data}")
+
             # 发送训练请求
-            response = requests.post(TTS_URL + "/v1/preprocess_and_tran", json=data)
+            response = requests.post(
+                f"{TTS_URL}/v1/preprocess_and_tran",
+                json=data,
+                headers={"Content-Type": "application/json"}
+            )
+            
+            # 记录响应内容以便调试
+            logger.info(f"Training response status: {response.status_code}")
+            logger.info(f"Training response content: {response.text}")
+            
             response.raise_for_status()
             
             # 保存训练结果
             result = response.json()
             self.training_result = result
             return result
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"HTTP Error during training: {str(e)}")
+            logger.error(f"Response content: {e.response.text if hasattr(e, 'response') else 'No response content'}")
+            return None
         except Exception as e:
             logger.error(f"Error training voice model: {str(e)}")
             return None
@@ -62,11 +81,32 @@ class AudioService:
                 "speaker": voice_id,
                 "text": text,
                 "reference_audio": ref_audio,
-                "reference_text": ref_text
+                "reference_text": ref_text,
+                "format": "wav",
+                "topP": 0.7,
+                "max_new_tokens": 1024,
+                "chunk_length": 100,
+                "repetition_penalty": 1.2,
+                "temperature": 0.7,
+                "need_asr": False,
+                "streaming": False,
+                "is_fixed_seed": 0,
+                "is_norm": 0
             }
 
+            logger.info(f"Sending synthesis request with data: {data}")
+
             # 发送合成请求
-            response = requests.post(TTS_URL + "/v1/invoke", json=data)
+            response = requests.post(
+                f"{TTS_URL}/v1/invoke",
+                json=data,
+                headers={"Content-Type": "application/json"}
+            )
+            
+            # 记录响应内容以便调试
+            logger.info(f"Synthesis response status: {response.status_code}")
+            logger.info(f"Synthesis response content: {response.text}")
+            
             response.raise_for_status()
             
             # 保存合成的音频
@@ -77,6 +117,10 @@ class AudioService:
                 raise ValueError("No audio path in response")
                 
             return audio_path
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"HTTP Error during synthesis: {str(e)}")
+            logger.error(f"Response content: {e.response.text if hasattr(e, 'response') else 'No response content'}")
+            raise
         except Exception as e:
             logger.error(f"Error synthesizing audio: {str(e)}")
             raise 
