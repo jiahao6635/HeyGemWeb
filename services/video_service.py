@@ -2,7 +2,7 @@ import logging
 import uuid
 from pathlib import Path
 import requests
-from config import VIDEO_URL
+from config import VIDEO_URL, UPLOAD_DIR, OUTPUT_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -13,15 +13,36 @@ class VideoService:
     def make_video(self, video_path: Path, audio_path: Path) -> str:
         """生成视频"""
         try:
+            # 获取相对路径
+            video_relative = video_path.name  # 只使用文件名
+            audio_relative = audio_path.name  # 只使用文件名
+
+            # 生成唯一的任务ID
+            task_id = str(uuid.uuid4())
+
             # 准备请求参数
             data = {
-                "audio_url": str(audio_path),
-                "video_url": str(video_path),
-                "code": str(video_path.stem)  # 使用视频文件名作为code
+                "audio_url": audio_relative,
+                "video_url": video_relative,
+                "code": task_id,
+                "chaofen": 0,
+                "watermark_switch": 0,
+                "pn": 1
             }
 
+            logger.info(f"Sending video generation request with data: {data}")
+
             # 发送视频合成请求
-            response = requests.post(self.face2face_url + "/easy/submit", json=data)
+            response = requests.post(
+                f"{self.face2face_url}/easy/submit",
+                json=data,
+                headers={"Content-Type": "application/json"}
+            )
+            
+            # 记录响应内容以便调试
+            logger.info(f"Video generation response status: {response.status_code}")
+            logger.info(f"Video generation response content: {response.text}")
+            
             response.raise_for_status()
             
             # 返回任务ID
@@ -33,6 +54,10 @@ class VideoService:
                 
             logger.info(f"Video generation started. Task ID: {task_id}")
             return task_id
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"HTTP Error during video generation: {str(e)}")
+            logger.error(f"Response content: {e.response.text if hasattr(e, 'response') else 'No response content'}")
+            raise
         except Exception as e:
             logger.error(f"Error making video: {str(e)}")
             raise
@@ -44,12 +69,25 @@ class VideoService:
 
         try:
             # 发送状态查询请求
-            response = requests.get(f"{self.face2face_url}/easy/query", params={"code": task_id})
+            response = requests.get(
+                f"{self.face2face_url}/easy/query",
+                params={"code": task_id},
+                headers={"Content-Type": "application/json"}
+            )
+            
+            # 记录响应内容以便调试
+            logger.info(f"Status check response status: {response.status_code}")
+            logger.info(f"Status check response content: {response.text}")
+            
             response.raise_for_status()
             
             status_data = response.json()
             logger.info(f"Status checked for task {task_id}: {status_data}")
             return status_data
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"HTTP Error during status check: {str(e)}")
+            logger.error(f"Response content: {e.response.text if hasattr(e, 'response') else 'No response content'}")
+            raise
         except Exception as e:
             logger.error(f"Error checking status: {str(e)}")
             raise 

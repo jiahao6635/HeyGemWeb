@@ -3,7 +3,7 @@ import json
 import requests
 import logging
 from pathlib import Path
-from config import TTS_URL, VIDEO_URL
+from config import TTS_URL, VIDEO_URL, TTS_TRAIN_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +28,15 @@ class AudioService:
             if not os.path.exists(audio_path):
                 raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
+            # 获取相对路径
+            audio_path = Path(audio_path)
+            relative_path = audio_path.relative_to(TTS_TRAIN_DIR.parent)
+            reference_audio = str(relative_path).replace('\\', '/')  # 确保使用正斜杠
+
             # 准备训练参数
             data = {
-                "format": "wav",  # 修改为wav而不是.wav
-                "reference_audio": str(audio_path),
+                "format": "wav",
+                "reference_audio": reference_audio,
                 "lang": "zh"
             }
 
