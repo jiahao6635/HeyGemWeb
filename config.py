@@ -5,7 +5,6 @@ from pathlib import Path
 IS_WINDOWS = os.name == 'nt'
 
 # API endpoints - 所有服务都在同一台机器上，使用localhost
-FACE2FACE_URL = "http://localhost:8383/easy"  # 视频服务
 TTS_URL = "http://localhost:18180"  # 语音服务
 VIDEO_URL = "http://localhost:8383"  # 视频服务基础URL
 

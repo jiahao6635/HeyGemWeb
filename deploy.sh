@@ -4,7 +4,8 @@
 set -e
 
 # 创建必要的目录
-sudo mkdir -p /opt/heygem/{uploads,outputs,logs,tts/{train,product}}
+sudo mkdir -p /opt/heygem/face2face/{temp,result,log}
+sudo mkdir -p /opt/heygem/voice/data/{origin_audio,processed_audio}
 sudo chown -R $USER:$USER /opt/heygem
 sudo chmod -R 755 /opt/heygem
 
