@@ -101,19 +101,21 @@ class AudioService:
 
             logger.info(f"Sending synthesis request with data: {data}")
 
-            # 发送合成请求
+            # 发送合成请求，设置stream=True以获取二进制数据
             response = requests.post(
                 f"{TTS_URL}/v1/invoke",
                 json=data,
-                headers={"Content-Type": "application/json"}
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "audio/wav"  # 指定接受音频数据
+                },
+                stream=True  # 启用流式传输
             )
-            
-            # 记录响应内容以便调试
             
             response.raise_for_status()
             
-            # 获取音频数据
-            audio_data = response.text
+            # 获取音频数据（二进制数据）
+            audio_data = response.raw.read()
             
             # 生成唯一的音频文件名
             audio_filename = f"audio_{voice_id}.wav"
