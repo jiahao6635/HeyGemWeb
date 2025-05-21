@@ -3,7 +3,7 @@ import json
 import requests
 import logging
 from pathlib import Path
-from config import TTS_URL, VIDEO_URL, TTS_TRAIN_DIR
+from config import TTS_URL, VIDEO_URL, TTS_TRAIN_DIR, UPLOAD_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -109,19 +109,26 @@ class AudioService:
             )
             
             # 记录响应内容以便调试
-            logger.info(f"Synthesis response status: {response.status_code}")
-            logger.info(f"Synthesis response content: {response.text}")
             
             response.raise_for_status()
             
-            # 保存合成的音频
-            result = response.json()
-            audio_path = result.get('audio_path')
+            # 获取音频数据
+            audio_data = response.text
             
-            if not audio_path:
-                raise ValueError("No audio path in response")
-                
-            return audio_path
+            # 生成唯一的音频文件名
+            audio_filename = f"audio_{voice_id}.wav"
+            audio_path = UPLOAD_DIR / audio_filename
+            
+            # 确保目录存在
+            UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            
+            # 保存音频文件
+            with open(audio_path, 'wb') as f:
+                f.write(audio_data)
+            
+            logger.info(f"Audio saved to: {audio_path}")
+            
+            return audio_filename
         except requests.exceptions.HTTPError as e:
             logger.error(f"HTTP Error during synthesis: {str(e)}")
             logger.error(f"Response content: {e.response.text if hasattr(e, 'response') else 'No response content'}")

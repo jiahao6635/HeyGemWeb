@@ -45,10 +45,7 @@ class VideoService:
             
             response.raise_for_status()
             
-            # 返回任务ID
-            result = response.json()
-            task_id = result.get('code')
-            
+            logger.info(f"Video generation response: {response}")
             if not task_id:
                 raise ValueError("No task ID in response")
                 
