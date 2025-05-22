@@ -248,14 +248,14 @@ class HeyGemApp:
                             elem_id="works_gallery",
                             columns=3,
                             allow_preview=True,
-                            height=500,
-                            object_fit="contain"
+                            height=800,
+                            object_fit="contain",
+                            scrollable=True
                         )
                 with gr.Row():
                     refresh_btn = gr.Button("刷新作品列表")
                     selected_video = gr.State(value=None)   
                     download_btn = gr.Button("下载选中视频")
-                    video_file = gr.File(label="下载链接")
 
             with gr.Tab("我的数字模特"):
                 with gr.Row():
@@ -266,14 +266,14 @@ class HeyGemApp:
                             elem_id="models_gallery",
                             columns=3,
                             allow_preview=True,
-                            height=500,
-                            object_fit="contain"
+                            height=800,
+                            object_fit="contain",
+                            scrollable=True
                         )
                 with gr.Row():
                     refresh_models_btn = gr.Button("刷新模特列表")
                     selected_model = gr.State(value=None)
                     download_model_btn = gr.Button("下载选中模特")
-                    model_file = gr.File(label="下载链接")
 
             with gr.Tab("模型训练"):
                 with gr.Row():
@@ -332,37 +332,29 @@ class HeyGemApp:
                 return selected["path"]
 
             def download_selected_video(video_path):
-                try:
-                    if video_path and Path(video_path).exists():
-                        # 确保文件在允许的路径中
-                        if not str(video_path).startswith(str(UPLOAD_DIR)):
-                            raise ValueError("文件路径不在允许的目录中")
-                        return gr.File.update(value=str(video_path), visible=True)
-                    return gr.File.update(visible=False)
-                except Exception as e:
-                    logger.error(f"下载视频时发生错误: {str(e)}")
-                    return gr.File.update(visible=False)
+                if video_path and Path(video_path).exists():
+                    # 确保文件在允许的路径中
+                    if not str(video_path).startswith(str(UPLOAD_DIR)):
+                        raise ValueError("文件路径不在允许的目录中")
+                    return str(video_path)
+                return None
 
             def download_selected_model(model_path):
-                try:
-                    if model_path and Path(model_path).exists():
-                        # 确保文件在允许的路径中
-                        if not str(model_path).startswith(str(UPLOAD_DIR)):
-                            raise ValueError("文件路径不在允许的目录中")
-                        return gr.File.update(value=str(model_path), visible=True)
-                    return gr.File.update(visible=False)
-                except Exception as e:
-                    logger.error(f"下载模型时发生错误: {str(e)}")
-                    return gr.File.update(visible=False)
+                if model_path and Path(model_path).exists():
+                    # 确保文件在允许的路径中
+                    if not str(model_path).startswith(str(UPLOAD_DIR)):
+                        raise ValueError("文件路径不在允许的目录中")
+                    return str(model_path)
+                return None
 
             # 作品相关事件
             works_gallery.select(select_video, outputs=selected_video)
-            download_btn.click(download_selected_video, inputs=selected_video, outputs=video_file)
+            download_btn.click(download_selected_video, inputs=selected_video, outputs=None)
             refresh_btn.click(get_gallery_items, None, works_gallery)
 
             # 模特相关事件
             models_gallery.select(select_model, outputs=selected_model)
-            download_model_btn.click(download_selected_model, inputs=selected_model, outputs=model_file)
+            download_model_btn.click(download_selected_model, inputs=selected_model, outputs=None)
             refresh_models_btn.click(get_models_items, None, models_gallery)
 
             # 初始化列表
@@ -416,7 +408,7 @@ class HeyGemApp:
                         video_path=Path(video_path),
                         audio_path=Path(audio_path)
                     )
-                    return f"任务ID: {task_id}", "", None, None
+                    return task_id, "", None, None
                 except Exception as e:
                     logger.error(f"生成过程中发生错误: {str(e)}")
                     return f"错误: {str(e)}", "", None, None
@@ -431,13 +423,13 @@ class HeyGemApp:
                     if status_data.get('code') == 10000:
                         data = status_data.get('data', {})
                         if data.get('status') == 1:
-                            return f"进度: {data.get('progress')}%\n状态: 处理中", None, None
+                            return f"进度: {data.get('progress')}%状态: 处理中", None, None
                         elif data.get('status') == 2:
                             video_path = data.get('result')
-                            return f"状态: 已完成\n视频保存位置: {video_path}", video_path, video_path
+                            return f"状态: 已完成,视频保存位置: {video_path}", video_path, video_path
                         elif data.get('status') == 3:
-                            return f"状态: 失败\n错误: {data.get('msg')}", None, None
-                    return f"状态: 未知\n响应: {status_data}", None, None
+                            return f"状态: 失败,错误: {data.get('msg')}", None, None
+                    return f"状态: 未知,响应: {status_data}", None, None
                 except Exception as e:
                     logger.error(f"状态检查过程中发生错误: {str(e)}")
                     return f"状态检查过程中发生错误: {str(e)}", None, None
