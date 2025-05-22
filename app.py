@@ -193,7 +193,8 @@ class HeyGemApp:
         """获取所有作品信息（视频名称、路径、封面）"""
         works = []
         for file in self.file_service.scan_works():
-            file_path = Path(file)
+            # 兼容 file 可能为 dict 或 str
+            file_path = Path(file["path"]) if isinstance(file, dict) else Path(file)
             works.append({
                 "name": file_path.stem,
                 "path": str(file_path),
@@ -206,7 +207,8 @@ class HeyGemApp:
         """获取所有模特模型信息"""
         models = []
         for file in self.file_service.scan_models():
-            file_path = Path(file)
+            # 兼容 file 可能为 dict 或 str
+            file_path = Path(file["path"]) if isinstance(file, dict) else Path(file)
             models.append({
                 "name": file_path.stem,
                 "path": str(file_path),
