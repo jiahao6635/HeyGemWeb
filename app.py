@@ -7,7 +7,8 @@ from config import (
     SERVER_PORT,
     LOG_FILE,
     LOG_LEVEL,
-    LOG_DIR
+    LOG_DIR,
+    UPLOAD_DIR
 )
 from services.audio_service import AudioService
 from services.video_service import VideoService
@@ -237,6 +238,7 @@ class HeyGemApp:
                     refresh_btn = gr.Button("刷新作品列表")
                     selected_video = gr.State(value=None)   
                     download_btn = gr.Button("下载选中视频")
+                    video_file = gr.File(label="下载链接")
 
             with gr.Tab("我的数字模特"):
                 with gr.Row():
@@ -254,6 +256,7 @@ class HeyGemApp:
                     refresh_models_btn = gr.Button("刷新模特列表")
                     selected_model = gr.State(value=None)
                     download_model_btn = gr.Button("下载选中模特")
+                    model_file = gr.File(label="下载链接")
 
             with gr.Tab("模型训练"):
                 with gr.Row():
@@ -268,21 +271,14 @@ class HeyGemApp:
             with gr.Tab("视频生成"):
                 with gr.Row():
                     with gr.Column():
-                        video_path_input = gr.Dropdown(
+                        video_path_input = gr.Textbox(
                             label="选择数字人模特",
-                            choices=[],
-                            allow_custom_value=True,
+                            placeholder="请输入模特名称（例如：model1）",
                             value=None
                         )
                         text_input = gr.Textbox(label="要合成的文本", lines=3)
                         generate_btn = gr.Button("生成视频")
                         task_id_output = gr.Textbox(label="任务ID")
-            
-            with gr.Tab("状态检查"):
-                with gr.Row():
-                    with gr.Column():
-                        task_id_input = gr.Textbox(label="任务ID")
-                        check_btn = gr.Button("检查状态")
                         status_output = gr.Textbox(label="状态", lines=3)
                         video_preview = gr.Video(label="视频预览")
                         video_download = gr.File(label="下载视频")
@@ -309,10 +305,6 @@ class HeyGemApp:
                 models = self.get_models_info()
                 return [(m["path"], m["name"]) for m in models]
 
-            def get_models_dropdown():
-                models = self.get_models_info()
-                return gr.Dropdown.update(choices=[{"label": m["name"], "value": m["path"]} for m in models])
-
             def select_video(evt: gr.SelectData):
                 works = self.get_works_info()
                 selected = works[evt.index]
@@ -325,8 +317,8 @@ class HeyGemApp:
 
             def download_selected_video(video_path):
                 if video_path and Path(video_path).exists():
-                    return str(video_path)
-                return None
+                    return gr.File.update(value=video_path, visible=True)
+                return gr.File.update(visible=False)
 
             def download_selected_model(model_path):
                 if model_path and Path(model_path).exists():
@@ -335,7 +327,7 @@ class HeyGemApp:
 
             # 作品相关事件
             works_gallery.select(select_video, outputs=selected_video)
-            download_btn.click(download_selected_video, inputs=selected_video, outputs=None)
+            download_btn.click(download_selected_video, inputs=selected_video, outputs=video_file)
             refresh_btn.click(get_gallery_items, None, works_gallery)
 
             # 模特相关事件
@@ -343,10 +335,9 @@ class HeyGemApp:
             download_model_btn.click(download_selected_model, inputs=selected_model, outputs=None)
             refresh_models_btn.click(get_models_items, None, models_gallery)
 
-            # 初始化下拉框选项和列表
-            demo.load(fn=get_models_dropdown,inputs=None,outputs=video_path_input)
-            demo.load(fn=get_gallery_items,inputs=None,outputs=works_gallery)
-            demo.load(fn=get_models_items,inputs=None,outputs=models_gallery)
+            # 初始化列表
+            demo.load(fn=get_gallery_items, inputs=None, outputs=works_gallery)
+            demo.load(fn=get_models_items, inputs=None, outputs=models_gallery)
 
             # 训练相关事件
             def on_training_complete(result):
@@ -365,9 +356,6 @@ class HeyGemApp:
                 inputs=[train_output],
                 outputs=[train_output, reference_audio, reference_text]
             ).then(
-                fn=get_models_dropdown,
-                outputs=[video_path_input]
-            ).then(
                 fn=get_models_items,
                 inputs=None,
                 outputs=models_gallery
@@ -377,6 +365,11 @@ class HeyGemApp:
                 try:
                     if not video_path:
                         raise ValueError("请选择数字人模特")
+                    
+                    # 构建完整的视频路径
+                    video_path = str(UPLOAD_DIR / f"{video_path}.mp4")
+                    if not Path(video_path).exists():
+                        raise ValueError(f"模特 {video_path} 不存在")
                         
                     audio_path = self.audio_service.synthesize_audio(
                         text=text,
@@ -387,21 +380,41 @@ class HeyGemApp:
                         video_path=Path(video_path),
                         audio_path=Path(audio_path)
                     )
-                    return f"任务ID: {task_id}"
+                    return f"任务ID: {task_id}", "", None, None
                 except Exception as e:
                     logger.error(f"生成过程中发生错误: {str(e)}")
-                    return f"错误: {str(e)}"
+                    return f"错误: {str(e)}", "", None, None
+
+            def check_status_loop(task_id):
+                if not task_id:
+                    return "", None, None
+                
+                try:
+                    status_data = self.video_service.check_status(task_id)
+                    
+                    if status_data.get('code') == 10000:
+                        data = status_data.get('data', {})
+                        if data.get('status') == 1:
+                            return f"进度: {data.get('progress')}%\n状态: 处理中", None, None
+                        elif data.get('status') == 2:
+                            video_path = data.get('result')
+                            return f"状态: 已完成\n视频保存位置: {video_path}", video_path, video_path
+                        elif data.get('status') == 3:
+                            return f"状态: 失败\n错误: {data.get('msg')}", None, None
+                    return f"状态: 未知\n响应: {status_data}", None, None
+                except Exception as e:
+                    logger.error(f"状态检查过程中发生错误: {str(e)}")
+                    return f"状态检查过程中发生错误: {str(e)}", None, None
             
             generate_btn.click(
                 fn=generate_video,
                 inputs=[video_path_input, text_input, reference_audio, reference_text],
-                outputs=[task_id_output]
-            )
-            
-            check_btn.click(
-                fn=self.check_status,
-                inputs=[task_id_input],
-                outputs=[status_output, video_preview, video_download]
+                outputs=[task_id_output, status_output, video_preview, video_download]
+            ).then(
+                fn=check_status_loop,
+                inputs=[task_id_output],
+                outputs=[status_output, video_preview, video_download],
+                every=5  # 每5秒检查一次状态
             )
             
             cleanup_btn.click(
