@@ -1,5 +1,6 @@
 #!/bin/bash
 
+
 # 获取脚本所在目录的绝对路径
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
@@ -16,6 +17,10 @@ start_service() {
     
     echo "启动 Python 应用..."
     
+    # 设置环境变量确保应用监听所有网络接口
+    export FLASK_RUN_HOST="0.0.0.0"
+    export FLASK_RUN_PORT="2531"
+    
     # 使用 nohup 确保进程在后台运行
     nohup python3 app.py > logs/app.log 2>&1 &
     
@@ -28,6 +33,7 @@ start_service() {
     if [ -f "$PID_FILE" ]; then
         echo "服务已启动，PID: $(cat $PID_FILE)"
         echo "日志文件: logs/app.log"
+        echo "访问地址: http://112.125.125.82:2531"
     else
         echo "服务启动失败，请检查日志文件"
         exit 1
