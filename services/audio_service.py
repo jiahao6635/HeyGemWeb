@@ -4,6 +4,7 @@ import requests
 import logging
 from pathlib import Path
 from config import TTS_URL, VIDEO_URL, TTS_TRAIN_DIR, UPLOAD_DIR
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -67,11 +68,8 @@ class AudioService:
             logger.error(f"Error training voice model: {str(e)}")
             return None
 
-    def save_training_result(self, result):
-        """保存训练结果"""
-        self.training_result = result
 
-    def synthesize_audio(self, voice_id, text, reference_audio=None, reference_text=None):
+    def synthesize_audio(self, text, reference_audio=None, reference_text=None):
         """合成音频"""
         try:
             # 使用保存的训练结果或传入的参数
@@ -83,7 +81,6 @@ class AudioService:
 
             # 准备合成参数
             data = {
-                "speaker": voice_id,
                 "text": text,
                 "reference_audio": ref_audio,
                 "reference_text": ref_text,
@@ -112,13 +109,15 @@ class AudioService:
                 stream=True  # 启用流式传输
             )
             
+            # 检查HTTP响应状态码，如果状态码不是200-299之间的值，将抛出HTTPError异常
             response.raise_for_status()
             
             # 获取音频数据（二进制数据）
             audio_data = response.raw.read()
             
             # 生成唯一的音频文件名
-            audio_filename = f"audio_{voice_id}.wav"
+            timestamp = datetime.now().strftime('%Y%m%d%H%M%S%f')[:-3]
+            audio_filename = f"audio_{timestamp}.wav"
             audio_path = UPLOAD_DIR / audio_filename
             
             # 确保目录存在

@@ -87,4 +87,17 @@ class VideoService:
             raise
         except Exception as e:
             logger.error(f"Error checking status: {str(e)}")
-            raise 
+            raise
+
+    def get_video_path(self, task_id: str) -> Path:
+        """获取生成的视频文件路径"""
+        status_data = self.check_status(task_id)
+        
+        if status_data.get('code') == 10000:
+            data = status_data.get('data', {})
+            if data.get('status') == 2:  # 已完成
+                video_path = data.get('result')
+                if video_path:
+                    return Path(video_path)
+        
+        raise ValueError("Video not found or not ready") 

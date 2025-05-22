@@ -27,8 +27,8 @@ for directory in [UPLOAD_DIR, OUTPUT_DIR, TTS_DIR, TTS_TRAIN_DIR, TTS_PRODUCT_DI
     if not IS_WINDOWS:  # 只在Linux环境下设置权限
         os.chmod(directory, 0o755)
 
-# Allowed video extensions
-ALLOWED_EXTENSIONS = {'.mp4', '.avi', '.mov', '.mkv'}
+# Allowed video extensions - 只允许MP4格式
+ALLOWED_EXTENSIONS = {'.mp4'}
 
 # Server configuration
 SERVER_HOST = "0.0.0.0"  # 允许外部访问
