@@ -37,11 +37,11 @@ logger = logging.getLogger(__name__)
 
 custom_css = """
 /* 隐藏 Gradio 页脚 */
-footer, .svelte-1ipelgc, .svelte-1ipelgc * { display: none !important; }
+footer { display: none !important; }
 /* 隐藏 Gradio 顶部Logo和标题栏 */
-#logo, .prose, .gradio-container .prose, .gradio-container .svelte-1ipelgc { display: none !important; }
+#logo, .prose { display: none !important; }
 /* 隐藏加载动画 */
-#loading, .loading, .svelte-1ipelgc .loading { display: none !important; }
+#loading, .loading { display: none !important; }
 /* 隐藏 gradio 右下角的反馈按钮 */
 .gradio-app .fixed.bottom-4.right-4, .feedback { display: none !important; }
 
@@ -63,7 +63,6 @@ footer, .svelte-1ipelgc, .svelte-1ipelgc * { display: none !important; }
 /* 使用系统字体作为后备 */
 body {
     font-family: 'System UI', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-}
 }
 """
 
@@ -273,7 +272,7 @@ class HeyGemApp:
                             label="选择数字人模特",
                             choices=[{"label": m["name"], "value": m["path"]} for m in self.get_models_info()],
                             allow_custom_value=True,
-                            value=None  # 添加默认值
+                            value=None
                         )
                         text_input = gr.Textbox(label="要合成的文本", lines=3)
                         generate_btn = gr.Button("生成视频")
@@ -304,23 +303,14 @@ class HeyGemApp:
             # --- 我的作品逻辑 ---
             def get_gallery_items():
                 works = self.get_works_info()
-                # 返回 (视频路径, 名称) 的元组列表，支持视频预览
-                return [
-                    (w["path"], w["name"])
-                    for w in works
-                ]
+                return [(w["path"], w["name"]) for w in works]
 
             def get_models_items():
                 models = self.get_models_info()
-                # 返回 (视频路径, 名称) 的元组列表，支持视频预览
-                return [
-                    (m["path"], m["name"])
-                    for m in models
-                ]
+                return [(m["path"], m["name"]) for m in models]
 
             def get_models_dropdown():
                 models = self.get_models_info()
-                # 返回下拉框选项列表，每个选项包含label和value
                 return [{"label": m["name"], "value": m["path"]} for m in models]
 
             def select_video(evt: gr.SelectData):
@@ -348,18 +338,17 @@ class HeyGemApp:
             download_btn.click(download_selected_video, inputs=selected_video, outputs=None)
             refresh_btn.click(get_gallery_items, None, works_gallery)
 
-
             # 模特相关事件
             models_gallery.select(select_model, outputs=selected_model)
             download_model_btn.click(download_selected_model, inputs=selected_model, outputs=None)
             refresh_models_btn.click(get_models_items, None, models_gallery)
 
-
-            # 初始化下拉框选项
-            demo.load(get_models_dropdown, None, video_path_input)
-            # 初始化作品和模特列表
-            demo.load(get_gallery_items, None, works_gallery)
-            demo.load(get_models_items, None, models_gallery)
+            # 初始化下拉框选项和列表
+            demo.load(
+                fn=[get_models_dropdown, get_gallery_items, get_models_items],
+                inputs=None,
+                outputs=[video_path_input, works_gallery, models_gallery]
+            )
 
             # 训练相关事件
             def on_training_complete(result):
@@ -378,7 +367,7 @@ class HeyGemApp:
                 inputs=[train_output],
                 outputs=[train_output, reference_audio, reference_text]
             ).then(
-                fn=get_models_dropdown,  # 用于刷新下拉框
+                fn=get_models_dropdown,
                 outputs=[video_path_input]
             ).then(
                 fn=get_models_items,
