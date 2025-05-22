@@ -44,6 +44,27 @@ footer, .svelte-1ipelgc, .svelte-1ipelgc * { display: none !important; }
 #loading, .loading, .svelte-1ipelgc .loading { display: none !important; }
 /* 隐藏 gradio 右下角的反馈按钮 */
 .gradio-app .fixed.bottom-4.right-4, .feedback { display: none !important; }
+
+/* 自定义字体设置 */
+@font-face {
+    font-family: 'System UI';
+    src: local('system-ui');
+    font-weight: normal;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'System UI';
+    src: local('system-ui');
+    font-weight: bold;
+    font-style: normal;
+}
+
+/* 使用系统字体作为后备 */
+body {
+    font-family: 'System UI', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+}
+}
 """
 
 class HeyGemApp:
@@ -215,7 +236,7 @@ class HeyGemApp:
                         )
                 with gr.Row():
                     refresh_btn = gr.Button("刷新作品列表")
-                    selected_video = gr.State(value=None)
+                    selected_video = gr.State(value=None)   
                     download_btn = gr.Button("下载选中视频")
 
             with gr.Tab("我的数字模特"):
@@ -285,11 +306,18 @@ class HeyGemApp:
             # --- 我的作品逻辑 ---
             def get_gallery_items():
                 works = self.get_works_info()
-                return [(w["thumbnail"] or w["path"], f"{w['name']}\n创建时间: {datetime.fromtimestamp(w['created_time']).strftime('%Y-%m-%d %H:%M:%S')}") for w in works]
+                # 只传视频路径和标题，便于视频预览
+                return [
+                    (w["path"], f"{w['name']}\n创建时间: {datetime.fromtimestamp(w['created_time']).strftime('%Y-%m-%d %H:%M:%S')}")
+                    for w in works
+                ]
 
             def get_models_items():
                 models = self.get_models_info()
-                return [(m["thumbnail"] or m["path"], f"{m['name']}\n创建时间: {datetime.fromtimestamp(m['created_time']).strftime('%Y-%m-%d %H:%M:%S')}") for m in models]
+                return [
+                    (m["path"], f"{m['name']}\n创建时间: {datetime.fromtimestamp(m['created_time']).strftime('%Y-%m-%d %H:%M:%S')}")
+                    for m in models
+                ]
 
             def get_models_dropdown():
                 models = self.get_models_info()
