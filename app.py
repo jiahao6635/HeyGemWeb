@@ -286,7 +286,7 @@ class HeyGemApp:
 
             def get_models_dropdown():
                 models = self.get_models_info()
-                return [{"label": m["name"], "value": m["path"]} for m in models]
+                return [m["name"] for m in models]  # 只返回名称列表
 
             def select_video(evt: gr.SelectData):
                 return evt.value
@@ -341,13 +341,19 @@ class HeyGemApp:
             
             def generate_video(video_path, text, ref_audio, ref_text):
                 try:
+                    # 根据选择的模特名称找到对应的文件路径
+                    models = self.get_models_info()
+                    model_path = next((m["path"] for m in models if m["name"] == video_path), None)
+                    if not model_path:
+                        raise ValueError("找不到选中的模特文件")
+                        
                     audio_path = self.audio_service.synthesize_audio(
                         text=text,
                         reference_audio=ref_audio,
                         reference_text=ref_text
                     )
                     task_id = self.video_service.make_video(
-                        video_path=Path(video_path),
+                        video_path=Path(model_path),
                         audio_path=Path(audio_path)
                     )
                     return f"任务ID: {task_id}"
