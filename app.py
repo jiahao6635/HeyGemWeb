@@ -73,6 +73,7 @@ class HeyGemApp:
             training_result = self.audio_service.train_voice_model(audio_path)
             if not training_result:
                 return "错误: 语音模型训练失败"
+            self.uploaded_videos.append(str(video_path.name))
             
             return f"""模型训练成功完成。
             视频保存位置: {video_path}
@@ -171,28 +172,63 @@ class HeyGemApp:
             })
         return works
 
+    def get_models_info(self):
+        """获取所有模特模型信息"""
+        models = []
+        for file in self.file_service.scan_models():
+            file_path = Path(file)
+            models.append({
+                "name": file_path.stem,
+                "path": str(file_path),
+                "cover": None  # 可扩展为缩略图
+            })
+        return models
+
     def create_interface(self):
         """创建Gradio界面"""
         with gr.Blocks(title="HeyGem数字人", css=custom_css) as demo:
             gr.Markdown("# HeyGem数字人界面")
             
             with gr.Tab("我的作品"):
-                works_gallery = gr.Gallery(
-                    label="我的作品",
-                    show_label=True,
-                    elem_id="works_gallery",
-                    columns=3,
-                    allow_preview=True,
-                    height=320
-                )
-                selected_video = gr.State(value=None)
-                download_btn = gr.Button("下载选中视频")
-                video_file = gr.File(label="下载链接")
+                with gr.Row():
+                    works_gallery = gr.Gallery(
+                        label="我的作品",
+                        show_label=True,
+                        elem_id="works_gallery",
+                        columns=3,
+                        allow_preview=True,
+                        height=320
+                    )
+                with gr.Row():
+                    refresh_btn = gr.Button("刷新作品列表")
+                    selected_video = gr.State(value=None)
+                    download_btn = gr.Button("下载选中视频")
+                    video_file = gr.File(label="下载链接")
+
+            with gr.Tab("我的数字模特"):
+                with gr.Row():
+                    models_gallery = gr.Gallery(
+                        label="我的数字模特",
+                        show_label=True,
+                        elem_id="models_gallery",
+                        columns=3,
+                        allow_preview=True,
+                        height=320,
+                        preview=True,
+                        object_fit="contain"
+                    )
+                with gr.Row():
+                    refresh_models_btn = gr.Button("刷新模特列表")
+                    selected_model = gr.State(value=None)
+                    download_model_btn = gr.Button("下载选中模特")
+                    model_file = gr.File(label="下载链接")
+                    model_preview = gr.Video(label="模特预览")
             
             with gr.Tab("模型训练"):
                 with gr.Row():
                     with gr.Column():
                         video_input = gr.File(label="上传视频")
+                        model_name = gr.Textbox(label="模特名称", placeholder="请输入模特名称")
                         train_btn = gr.Button("开始训练")
                         train_output = gr.Textbox(label="训练状态", lines=5)
                         reference_audio = gr.Textbox(label="参考音频URL", visible=False)
@@ -202,8 +238,8 @@ class HeyGemApp:
                 with gr.Row():
                     with gr.Column():
                         video_path_input = gr.Dropdown(
-                            label="选择视频",
-                            choices=self.get_uploaded_videos(),
+                            label="选择数字人模特",
+                            choices=self.get_models_info(),  # 使用模特列表而不是上传的视频列表
                             allow_custom_value=True
                         )
                         text_input = gr.Textbox(label="要合成的文本", lines=3)
@@ -235,23 +271,43 @@ class HeyGemApp:
             # --- 我的作品逻辑 ---
             def get_gallery_items():
                 works = self.get_works_info()
-                return [w["path"] for w in works]  # 直接返回文件路径列表
+                return [w["path"] for w in works]
+
+            def get_models_items():
+                models = self.get_models_info()
+                return [m["path"] for m in models]
+
+            def get_models_dropdown():
+                models = self.get_models_info()
+                return [{"label": m["name"], "value": m["path"]} for m in models]
 
             def select_video(evt: gr.SelectData):
-                # evt.value 是视频路径
                 return evt.value
+
+            def select_model(evt: gr.SelectData):
+                return evt.value, evt.value  # 返回模型路径用于预览和下载
 
             def download_selected_video(video_path):
                 if video_path and Path(video_path).exists():
-                    # 返回本地文件路径即可，gr.File会自动处理下载
                     return video_path
                 return None
 
+            def download_selected_model(model_path):
+                if model_path and Path(model_path).exists():
+                    return model_path
+                return None
+
+            # 作品相关事件
             works_gallery.select(select_video, outputs=selected_video)
             download_btn.click(download_selected_video, inputs=selected_video, outputs=video_file)
-            demo.load(get_gallery_items, None, works_gallery)
+            refresh_btn.click(get_gallery_items, None, works_gallery)
 
-            # --- 其他Tab事件处理器保持不变 ---
+            # 模特相关事件
+            models_gallery.select(select_model, outputs=[selected_model, model_preview])
+            download_model_btn.click(download_selected_model, inputs=selected_model, outputs=model_file)
+            refresh_models_btn.click(get_models_items, None, models_gallery)
+
+            # 训练相关事件
             def on_training_complete(result):
                 if "参考音频:" in result and "参考文本:" in result:
                     ref_audio = result.split("参考音频:")[1].split("\n")[0].strip()
@@ -261,15 +317,19 @@ class HeyGemApp:
             
             train_btn.click(
                 fn=self.train_model,
-                inputs=[video_input],
+                inputs=[video_input, model_name],
                 outputs=[train_output]
             ).then(
                 fn=on_training_complete,
                 inputs=[train_output],
                 outputs=[train_output, reference_audio, reference_text]
             ).then(
-                fn=lambda: self.get_uploaded_videos(),
+                fn=get_models_dropdown,  # 使用新的函数更新下拉框
                 outputs=[video_path_input]
+            ).then(
+                fn=get_models_items,
+                inputs=None,
+                outputs=models_gallery
             )
             
             def generate_video(video_path, text, ref_audio, ref_text):

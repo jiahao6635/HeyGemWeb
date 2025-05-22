@@ -84,6 +84,20 @@ class FileService:
             logger.error(f"Error scanning works: {str(e)}")
             return []
 
+    def scan_models(self) -> list[str]:
+        """扫描所有模特文件（不以 -r.mp4 结尾的MP4文件）"""
+        models = []
+        try:
+            self.upload_dir.mkdir(parents=True, exist_ok=True)
+            for file_path in self.upload_dir.glob('*.mp4'):
+                if file_path.is_file() and not (file_path.name.endswith('-r.mp4') or file_path.name.endswith('-t.mp4')):
+                    models.append(str(file_path))
+            logger.info(f"Found {len(models)} models in {self.upload_dir}")
+            return models
+        except Exception as e:
+            logger.error(f"Error scanning models: {str(e)}")
+            return []
+
     def cleanup_temp_files(self, days_old: int = 7) -> dict:
         """清理临时文件
         
