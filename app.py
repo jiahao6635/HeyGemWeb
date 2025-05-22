@@ -15,6 +15,7 @@ from services.video_service import VideoService
 from services.file_service import FileService
 import mimetypes
 from datetime import datetime
+import json
 
 # 确保日志目录存在
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -98,6 +99,11 @@ class HeyGemApp:
             training_result = self.audio_service.train_voice_model(audio_path)
             if not training_result:
                 return "错误: 语音模型训练失败"
+            
+            # 保存训练结果到文件
+            result_file = video_path.parent / f"{model_name}_training.json"
+            with open(result_file, 'w', encoding='utf-8') as f:
+                json.dump(training_result, f, ensure_ascii=False, indent=2)
             
             # 重命名视频文件为模特名称
             new_video_path = video_path.parent / f"{model_name}.mp4"
@@ -216,6 +222,17 @@ class HeyGemApp:
             })
         return models
 
+    def get_model_training_result(self, model_name):
+        """获取模型的训练结果"""
+        try:
+            result_file = UPLOAD_DIR / f"{model_name}_training.json"
+            if result_file.exists():
+                with open(result_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            return None
+        except Exception as e:
+            logger.error(f"读取训练结果失败: {str(e)}")
+            return None
 
     def create_interface(self):
         """创建Gradio界面"""
@@ -281,8 +298,6 @@ class HeyGemApp:
                         task_id_output = gr.Textbox(label="任务ID")
                         check_status_btn = gr.Button("检查状态")
                         status_output = gr.Textbox(label="状态", lines=3)
-                        video_preview = gr.Video(label="视频预览")
-                        video_download = gr.File(label="下载视频")
             
             with gr.Tab("文件清理"):
                 with gr.Row():
@@ -320,7 +335,7 @@ class HeyGemApp:
                 try:
                     if video_path and Path(video_path).exists():
                         # 确保文件在允许的路径中
-                        if not str(video_path).startswith(str(UPLOAD_DIR)) and not str(video_path).startswith(str(OUTPUT_DIR)):
+                        if not str(video_path).startswith(str(UPLOAD_DIR)):
                             raise ValueError("文件路径不在允许的目录中")
                         return gr.File.update(value=str(video_path), visible=True)
                     return gr.File.update(visible=False)
@@ -386,6 +401,12 @@ class HeyGemApp:
                     if not Path(video_path).exists():
                         raise ValueError(f"模特 {video_path} 不存在")
                         
+                    # 获取模型的训练结果
+                    model_name = Path(video_path).stem
+                    training_result = self.get_model_training_result(model_name)
+                    if training_result:
+                        self.audio_service.training_result = training_result
+                        
                     audio_path = self.audio_service.synthesize_audio(
                         text=text,
                         reference_audio=ref_audio,
@@ -424,13 +445,13 @@ class HeyGemApp:
             generate_btn.click(
                 fn=generate_video,
                 inputs=[video_path_input, text_input, reference_audio, reference_text],
-                outputs=[task_id_output, status_output, video_preview, video_download]
+                outputs=[task_id_output, status_output]
             )
             
             check_status_btn.click(
                 fn=check_status_loop,
                 inputs=[task_id_output],
-                outputs=[status_output, video_preview, video_download]
+                outputs=[status_output]
             )
             
             
