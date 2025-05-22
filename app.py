@@ -321,9 +321,7 @@ class HeyGemApp:
             def get_models_dropdown():
                 models = self.get_models_info()
                 # 返回下拉框选项列表，每个选项包含label和value
-                return gr.Dropdown.update(
-                    choices=[{"label": m["name"], "value": m["path"]} for m in models]
-                )
+                return [{"label": m["name"], "value": m["path"]} for m in models]
 
             def select_video(evt: gr.SelectData):
                 works = self.get_works_info()
