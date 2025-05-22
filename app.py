@@ -249,8 +249,7 @@ class HeyGemApp:
                             columns=3,
                             allow_preview=True,
                             height=800,
-                            object_fit="contain",
-                            scrollable=True
+                            object_fit="contain"
                         )
                 with gr.Row():
                     refresh_btn = gr.Button("刷新作品列表")
@@ -267,8 +266,7 @@ class HeyGemApp:
                             columns=3,
                             allow_preview=True,
                             height=800,
-                            object_fit="contain",
-                            scrollable=True
+                            object_fit="contain"
                         )
                 with gr.Row():
                     refresh_models_btn = gr.Button("刷新模特列表")
