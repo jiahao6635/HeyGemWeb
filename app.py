@@ -54,11 +54,14 @@ class HeyGemApp:
         self.uploaded_videos = self.file_service.scan_uploaded_videos()
         logger.info(f"Initialized with {len(self.uploaded_videos)} uploaded videos")
 
-    def train_model(self, video_file):
+    def train_model(self, video_file, model_name):
         """训练模特模型"""
         try:
             if video_file is None:
                 return "错误: 请先上传视频文件"
+            
+            if not model_name:
+                return "错误: 请输入模特名称"
                 
             # 保存视频文件
             video_path = self.file_service.save_uploaded_file(video_file, video_file.name)
@@ -73,10 +76,14 @@ class HeyGemApp:
             training_result = self.audio_service.train_voice_model(audio_path)
             if not training_result:
                 return "错误: 语音模型训练失败"
-            self.uploaded_videos.append(str(video_path.name))
+            
+            # 重命名视频文件为模特名称
+            new_video_path = video_path.parent / f"{model_name}.mp4"
+            video_path.rename(new_video_path)
             
             return f"""模型训练成功完成。
-            视频保存位置: {video_path}
+            模特名称: {model_name}
+            视频保存位置: {new_video_path}
             音频保存位置: {audio_path}
             参考音频: {training_result.get('asr_format_audio_url')}
             参考文本: {training_result.get('reference_audio_text')}"""
