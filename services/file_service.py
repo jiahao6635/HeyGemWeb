@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from datetime import datetime
 from config import UPLOAD_DIR, TTS_TRAIN_DIR, ALLOWED_EXTENSIONS, MAX_CONTENT_LENGTH
+from typing import List
 
 logger = logging.getLogger(__name__)
 
@@ -70,33 +71,24 @@ class FileService:
             logger.error(f"Error scanning uploaded videos: {str(e)}")
             return []
 
-    def scan_works(self) -> list[str]:
-        """扫描所有以 -r.mp4 结尾的作品文件"""
+    def scan_works(self) -> List[dict]:
+        """扫描所有作品（以 -r.mp4 结尾）"""
         works = []
-        try:
-            self.upload_dir.mkdir(parents=True, exist_ok=True)
-            for file_path in self.upload_dir.glob('*-r.mp4'):
-                if file_path.is_file():
-                    works.append(str(file_path))
-            logger.info(f"Found {len(works)} works in {self.upload_dir}")
-            return works
-        except Exception as e:
-            logger.error(f"Error scanning works: {str(e)}")
-            return []
+        for file in self.upload_dir.glob("*-r.mp4"):
+            file_info = self.get_file_info(file)
+            if file_info:
+                works.append(file_info)
+        return works
 
-    def scan_models(self) -> list[str]:
-        """扫描所有模特文件（不以 -r.mp4 结尾的MP4文件）"""
+    def scan_models(self) -> List[dict]:
+        """扫描所有模特模型"""
         models = []
-        try:
-            self.upload_dir.mkdir(parents=True, exist_ok=True)
-            for file_path in self.upload_dir.glob('*.mp4'):
-                if file_path.is_file() and not (file_path.name.endswith('-r.mp4') or file_path.name.endswith('-t.mp4')):
-                    models.append(str(file_path))
-            logger.info(f"Found {len(models)} models in {self.upload_dir}")
-            return models
-        except Exception as e:
-            logger.error(f"Error scanning models: {str(e)}")
-            return []
+        for file in self.upload_dir.glob("*.mp4"):
+            if not file.name.endswith("-r.mp4"):
+                file_info = self.get_file_info(file)
+                if file_info:
+                    models.append(file_info)
+        return models
 
     def cleanup_temp_files(self, days_old: int = 7) -> dict:
         """清理临时文件
@@ -151,3 +143,40 @@ class FileService:
                 result['tts_product_dir']['failed'] += 1
         
         return result 
+
+    def get_file_info(self, file_path: Path) -> dict:
+        """获取文件信息"""
+        try:
+            stat = file_path.stat()
+            return {
+                "name": file_path.stem,
+                "path": str(file_path),
+                "created_time": stat.st_ctime,
+                "size": stat.st_size,
+                "thumbnail": self._generate_thumbnail(file_path) if file_path.suffix.lower() in ['.mp4', '.jpg', '.png'] else None
+            }
+        except Exception as e:
+            logger.error(f"获取文件信息失败: {str(e)}")
+            return None
+
+    def _generate_thumbnail(self, file_path: Path) -> str:
+        """生成视频或图片的缩略图"""
+        try:
+            if file_path.suffix.lower() == '.mp4':
+                # 使用 ffmpeg 生成视频缩略图
+                thumbnail_path = file_path.parent / f"{file_path.stem}_thumb.jpg"
+                if not thumbnail_path.exists():
+                    import subprocess
+                    subprocess.run([
+                        'ffmpeg', '-i', str(file_path),
+                        '-ss', '00:00:01', '-vframes', '1',
+                        str(thumbnail_path)
+                    ], capture_output=True)
+                return str(thumbnail_path)
+            elif file_path.suffix.lower() in ['.jpg', '.png']:
+                # 图片直接返回路径
+                return str(file_path)
+            return None
+        except Exception as e:
+            logger.error(f"生成缩略图失败: {str(e)}")
+            return None 

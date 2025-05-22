@@ -13,6 +13,7 @@ from services.audio_service import AudioService
 from services.video_service import VideoService
 from services.file_service import FileService
 import mimetypes
+from datetime import datetime
 
 # 确保日志目录存在
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -175,7 +176,8 @@ class HeyGemApp:
             works.append({
                 "name": file_path.stem,
                 "path": str(file_path),
-                "cover": None  # 可扩展为缩略图
+                "cover": None,  # 可扩展为缩略图
+                "created_time": file_path.stat().st_ctime
             })
         return works
 
@@ -187,7 +189,8 @@ class HeyGemApp:
             models.append({
                 "name": file_path.stem,
                 "path": str(file_path),
-                "cover": None  # 可扩展为缩略图
+                "cover": None,  # 可扩展为缩略图
+                "created_time": file_path.stat().st_ctime
             })
         return models
 
@@ -198,39 +201,42 @@ class HeyGemApp:
             
             with gr.Tab("我的作品"):
                 with gr.Row():
-                    works_gallery = gr.Gallery(
-                        label="我的作品",
-                        show_label=True,
-                        elem_id="works_gallery",
-                        columns=3,
-                        allow_preview=True,
-                        height=320
-                    )
+                    with gr.Column(scale=1):
+                        works_gallery = gr.Gallery(
+                            label="我的作品",
+                            show_label=True,
+                            elem_id="works_gallery",
+                            columns=3,
+                            allow_preview=True,
+                            height=600,  # 增加高度以显示更多内容
+                            object_fit="contain",
+                            show_download_button=True,
+                            container=True
+                        )
                 with gr.Row():
                     refresh_btn = gr.Button("刷新作品列表")
                     selected_video = gr.State(value=None)
                     download_btn = gr.Button("下载选中视频")
-                    video_file = gr.File(label="下载链接")
 
             with gr.Tab("我的数字模特"):
                 with gr.Row():
-                    models_gallery = gr.Gallery(
-                        label="我的数字模特",
-                        show_label=True,
-                        elem_id="models_gallery",
-                        columns=3,
-                        allow_preview=True,
-                        height=320,
-                        preview=True,
-                        object_fit="contain"
-                    )
+                    with gr.Column(scale=1):
+                        models_gallery = gr.Gallery(
+                            label="我的数字模特",
+                            show_label=True,
+                            elem_id="models_gallery",
+                            columns=3,
+                            allow_preview=True,
+                            height=600,  # 增加高度以显示更多内容
+                            object_fit="contain",
+                            show_download_button=True,
+                            container=True
+                        )
                 with gr.Row():
                     refresh_models_btn = gr.Button("刷新模特列表")
                     selected_model = gr.State(value=None)
                     download_model_btn = gr.Button("下载选中模特")
-                    model_file = gr.File(label="下载链接")
-                    model_preview = gr.Video(label="模特预览")
-            
+
             with gr.Tab("模型训练"):
                 with gr.Row():
                     with gr.Column():
@@ -279,41 +285,43 @@ class HeyGemApp:
             # --- 我的作品逻辑 ---
             def get_gallery_items():
                 works = self.get_works_info()
-                return [w["path"] for w in works]
+                return [(w["thumbnail"] or w["path"], f"{w['name']}\n创建时间: {datetime.fromtimestamp(w['created_time']).strftime('%Y-%m-%d %H:%M:%S')}") for w in works]
 
             def get_models_items():
                 models = self.get_models_info()
-                return [m["path"] for m in models]
+                return [(m["thumbnail"] or m["path"], f"{m['name']}\n创建时间: {datetime.fromtimestamp(m['created_time']).strftime('%Y-%m-%d %H:%M:%S')}") for m in models]
 
             def get_models_dropdown():
                 models = self.get_models_info()
-                return [{"label": m["name"], "value": m["path"]} for m in models]
+                return [{"label": f"{m['name']} ({datetime.fromtimestamp(m['created_time']).strftime('%Y-%m-%d')})", "value": m["path"]} for m in models]
 
             def select_video(evt: gr.SelectData):
-                return evt.value
+                works = self.get_works_info()
+                selected = works[evt.index]
+                return selected["path"]
 
             def select_model(evt: gr.SelectData):
-                return evt.value, evt.value  # 返回模型路径用于预览和下载
+                models = self.get_models_info()
+                selected = models[evt.index]
+                return selected["path"]
 
             def download_selected_video(video_path):
                 if video_path and Path(video_path).exists():
-                    return video_path
+                    return str(video_path)
                 return None
 
             def download_selected_model(model_path):
                 if model_path and Path(model_path).exists():
-                    return model_path
+                    return str(model_path)
                 return None
 
             # 作品相关事件
             works_gallery.select(select_video, outputs=selected_video)
-            download_btn.click(download_selected_video, inputs=selected_video, outputs=video_file)
-            refresh_btn.click(get_gallery_items, None, works_gallery)
+            download_btn.click(download_selected_video, inputs=selected_video, outputs=None)
 
             # 模特相关事件
-            models_gallery.select(select_model, outputs=[selected_model, model_preview])
-            download_model_btn.click(download_selected_model, inputs=selected_model, outputs=model_file)
-            refresh_models_btn.click(get_models_items, None, models_gallery)
+            models_gallery.select(select_model, outputs=selected_model)
+            download_model_btn.click(download_selected_model, inputs=selected_model, outputs=None)
 
             # 初始化下拉框选项
             demo.load(get_models_dropdown, None, video_path_input)
