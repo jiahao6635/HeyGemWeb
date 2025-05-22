@@ -271,7 +271,7 @@ class HeyGemApp:
                     with gr.Column():
                         video_path_input = gr.Dropdown(
                             label="选择数字人模特",
-                            choices=self.get_models_info(),
+                            choices=[{"label": m["name"], "value": m["path"]} for m in self.get_models_info()],
                             allow_custom_value=True,
                             value=None  # 添加默认值
                         )
