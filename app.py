@@ -12,6 +12,7 @@ from config import (
 from services.audio_service import AudioService
 from services.video_service import VideoService
 from services.file_service import FileService
+import mimetypes
 
 # 确保日志目录存在
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -33,6 +34,17 @@ except Exception as e:
 
 logger = logging.getLogger(__name__)
 
+custom_css = """
+/* 隐藏 Gradio 页脚 */
+footer, .svelte-1ipelgc, .svelte-1ipelgc * { display: none !important; }
+/* 隐藏 Gradio 顶部Logo和标题栏 */
+#logo, .prose, .gradio-container .prose, .gradio-container .svelte-1ipelgc { display: none !important; }
+/* 隐藏加载动画 */
+#loading, .loading, .svelte-1ipelgc .loading { display: none !important; }
+/* 隐藏 gradio 右下角的反馈按钮 */
+.gradio-app .fixed.bottom-4.right-4, .feedback { display: none !important; }
+"""
+
 class HeyGemApp:
     def __init__(self):
         self.audio_service = AudioService()
@@ -50,7 +62,7 @@ class HeyGemApp:
                 
             # 保存视频文件
             video_path = self.file_service.save_uploaded_file(video_file, video_file.name)
-            self.uploaded_videos.append(str(video_path))  # 添加到已上传视频列表
+            self.uploaded_videos.append(str(video_path.name))  # 添加到已上传视频列表
             
             # 提取音频
             audio_path = self.file_service.get_audio_path(video_path)
@@ -143,10 +155,39 @@ class HeyGemApp:
             logger.error(f"清理过程中发生错误: {str(e)}")
             return f"清理过程中发生错误: {str(e)}"
 
+    def get_works(self):
+        """获取所有作品列表（以 -r.mp4 结尾）"""
+        return self.file_service.scan_works()
+
+    def get_works_info(self):
+        """获取所有作品信息（视频名称、路径、封面）"""
+        works = []
+        for file in self.file_service.scan_works():
+            file_path = Path(file)
+            works.append({
+                "name": file_path.stem,
+                "path": str(file_path),
+                "cover": None  # 可扩展为缩略图
+            })
+        return works
+
     def create_interface(self):
         """创建Gradio界面"""
-        with gr.Blocks(title="HeyGem数字人") as demo:
+        with gr.Blocks(title="HeyGem数字人", css=custom_css) as demo:
             gr.Markdown("# HeyGem数字人界面")
+            
+            with gr.Tab("我的作品"):
+                works_gallery = gr.Gallery(
+                    label="我的作品",
+                    show_label=True,
+                    elem_id="works_gallery",
+                    columns=3,
+                    allow_preview=True,
+                    height=320
+                )
+                selected_video = gr.State(value=None)
+                download_btn = gr.Button("下载选中视频")
+                video_file = gr.File(label="下载链接")
             
             with gr.Tab("模型训练"):
                 with gr.Row():
@@ -191,9 +232,33 @@ class HeyGemApp:
                         cleanup_btn = gr.Button("开始清理")
                         cleanup_output = gr.Textbox(label="清理结果", lines=10)
             
-            # 设置事件处理器
+            # --- 我的作品逻辑 ---
+            def get_gallery_items():
+                works = self.get_works_info()
+                return [
+                    gr.GalleryItem(
+                        value=w["path"],
+                        label=w["name"],
+                        type="video"
+                    ) for w in works
+                ]
+
+            def select_video(evt: gr.SelectData):
+                # evt.value 是视频路径
+                return evt.value
+
+            def download_selected_video(video_path):
+                if video_path and Path(video_path).exists():
+                    # 返回本地文件路径即可，gr.File会自动处理下载
+                    return video_path
+                return None
+
+            works_gallery.select(select_video, outputs=selected_video)
+            download_btn.click(download_selected_video, inputs=selected_video, outputs=video_file)
+            demo.load(get_gallery_items, None, works_gallery)
+
+            # --- 其他Tab事件处理器保持不变 ---
             def on_training_complete(result):
-                # 解析训练结果，提取reference_audio和reference_text
                 if "参考音频:" in result and "参考文本:" in result:
                     ref_audio = result.split("参考音频:")[1].split("\n")[0].strip()
                     ref_text = result.split("参考文本:")[1].strip()
@@ -215,14 +280,11 @@ class HeyGemApp:
             
             def generate_video(video_path, text, ref_audio, ref_text):
                 try:
-                    # 合成音频
                     audio_path = self.audio_service.synthesize_audio(
                         text=text,
                         reference_audio=ref_audio,
                         reference_text=ref_text
                     )
-                    
-                    # 生成视频
                     task_id = self.video_service.make_video(
                         video_path=Path(video_path),
                         audio_path=Path(audio_path)

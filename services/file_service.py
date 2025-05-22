@@ -52,7 +52,7 @@ class FileService:
         """扫描已上传的MP4视频文件
         
         Returns:
-            list[str]: 已上传MP4视频文件的路径列表
+            list[str]: 已上传MP4视频文件名称列表
         """
         videos = []
         try:
@@ -62,12 +62,26 @@ class FileService:
             # 扫描目录下的所有MP4文件
             for file_path in self.upload_dir.glob('*.mp4'):
                 if file_path.is_file():
-                    videos.append(str(file_path))
+                    videos.append(str(file_path.name))
             
             logger.info(f"Found {len(videos)} MP4 videos in {self.upload_dir}")
             return videos
         except Exception as e:
             logger.error(f"Error scanning uploaded videos: {str(e)}")
+            return []
+
+    def scan_works(self) -> list[str]:
+        """扫描所有以 -r.mp4 结尾的作品文件"""
+        works = []
+        try:
+            self.upload_dir.mkdir(parents=True, exist_ok=True)
+            for file_path in self.upload_dir.glob('*-r.mp4'):
+                if file_path.is_file():
+                    works.append(str(file_path))
+            logger.info(f"Found {len(works)} works in {self.upload_dir}")
+            return works
+        except Exception as e:
+            logger.error(f"Error scanning works: {str(e)}")
             return []
 
     def cleanup_temp_files(self, days_old: int = 7) -> dict:
