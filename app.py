@@ -323,7 +323,8 @@ class HeyGemApp:
 
             def get_models_dropdown():
                 models = self.get_models_info()
-                return [{"label": f"{m['name']} ({datetime.fromtimestamp(m['created_time']).strftime('%Y-%m-%d')})", "value": m["path"]} for m in models]
+                # 只返回文件名字符串列表
+                return [m["name"] for m in models]
 
             def select_video(evt: gr.SelectData):
                 works = self.get_works_info()
