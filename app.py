@@ -248,7 +248,7 @@ class HeyGemApp:
                             elem_id="works_gallery",
                             columns=3,
                             allow_preview=True,
-                            height=800,
+                            height=400,
                             object_fit="contain"
                         )
                 with gr.Row():
@@ -265,7 +265,7 @@ class HeyGemApp:
                             elem_id="models_gallery",
                             columns=3,
                             allow_preview=True,
-                            height=800,
+                            height=400,
                             object_fit="contain"
                         )
                 with gr.Row():
