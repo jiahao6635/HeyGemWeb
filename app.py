@@ -207,15 +207,14 @@ class HeyGemApp:
         """获取所有模特模型信息"""
         models = []
         for file in self.file_service.scan_models():
-            # 兼容 file 可能为 dict 或 str
-            file_path = Path(file["path"]) if isinstance(file, dict) else Path(file)
+            file_path = Path(file)
             models.append({
                 "name": file_path.stem,
                 "path": str(file_path),
-                "cover": None,  # 可扩展为缩略图
-                "created_time": file_path.stat().st_ctime
+                "cover": None  # 可扩展为缩略图
             })
         return models
+
 
     def create_interface(self):
         """创建Gradio界面"""
