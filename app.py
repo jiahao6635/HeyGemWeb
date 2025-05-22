@@ -236,11 +236,10 @@ class HeyGemApp:
             def get_gallery_items():
                 works = self.get_works_info()
                 return [
-                    gr.GalleryItem(
-                        value=w["path"],
-                        label=w["name"],
-                        type="video"
-                    ) for w in works
+                    {
+                        "path": w["path"],
+                        "name": w["name"]
+                    } for w in works
                 ]
 
             def select_video(evt: gr.SelectData):
