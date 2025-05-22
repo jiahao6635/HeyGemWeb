@@ -383,7 +383,7 @@ def main():
     demo.launch(
         server_name=SERVER_HOST,
         server_port=SERVER_PORT,
-        share=False,
+        share=True,
         allowed_paths=[
             "/root/heygem_data",  # 添加数据目录
             "/home/HeyGemWeb",    # 当前工作目录
