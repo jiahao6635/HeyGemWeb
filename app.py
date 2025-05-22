@@ -279,6 +279,7 @@ class HeyGemApp:
                         text_input = gr.Textbox(label="要合成的文本", lines=3)
                         generate_btn = gr.Button("生成视频")
                         task_id_output = gr.Textbox(label="任务ID")
+                        check_status_btn = gr.Button("检查状态")
                         status_output = gr.Textbox(label="状态", lines=3)
                         video_preview = gr.Video(label="视频预览")
                         video_download = gr.File(label="下载视频")
@@ -316,14 +317,28 @@ class HeyGemApp:
                 return selected["path"]
 
             def download_selected_video(video_path):
-                if video_path and Path(video_path).exists():
-                    return gr.File.update(value=video_path, visible=True)
-                return gr.File.update(visible=False)
+                try:
+                    if video_path and Path(video_path).exists():
+                        # 确保文件在允许的路径中
+                        if not str(video_path).startswith(str(UPLOAD_DIR)) and not str(video_path).startswith(str(OUTPUT_DIR)):
+                            raise ValueError("文件路径不在允许的目录中")
+                        return gr.File.update(value=str(video_path), visible=True)
+                    return gr.File.update(visible=False)
+                except Exception as e:
+                    logger.error(f"下载视频时发生错误: {str(e)}")
+                    return gr.File.update(visible=False)
 
             def download_selected_model(model_path):
-                if model_path and Path(model_path).exists():
-                    return str(model_path)
-                return None
+                try:
+                    if model_path and Path(model_path).exists():
+                        # 确保文件在允许的路径中
+                        if not str(model_path).startswith(str(UPLOAD_DIR)):
+                            raise ValueError("文件路径不在允许的目录中")
+                        return gr.File.update(value=str(model_path), visible=True)
+                    return gr.File.update(visible=False)
+                except Exception as e:
+                    logger.error(f"下载模型时发生错误: {str(e)}")
+                    return gr.File.update(visible=False)
 
             # 作品相关事件
             works_gallery.select(select_video, outputs=selected_video)
@@ -332,7 +347,7 @@ class HeyGemApp:
 
             # 模特相关事件
             models_gallery.select(select_model, outputs=selected_model)
-            download_model_btn.click(download_selected_model, inputs=selected_model, outputs=None)
+            download_model_btn.click(download_selected_model, inputs=selected_model, outputs=model_file)
             refresh_models_btn.click(get_models_items, None, models_gallery)
 
             # 初始化列表
@@ -410,12 +425,14 @@ class HeyGemApp:
                 fn=generate_video,
                 inputs=[video_path_input, text_input, reference_audio, reference_text],
                 outputs=[task_id_output, status_output, video_preview, video_download]
-            ).then(
+            )
+            
+            check_status_btn.click(
                 fn=check_status_loop,
                 inputs=[task_id_output],
-                outputs=[status_output, video_preview, video_download],
-                every=5  # 每5秒检查一次状态
+                outputs=[status_output, video_preview, video_download]
             )
+            
             
             cleanup_btn.click(
                 fn=self.cleanup_files,
