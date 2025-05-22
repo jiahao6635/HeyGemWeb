@@ -235,12 +235,7 @@ class HeyGemApp:
             # --- 我的作品逻辑 ---
             def get_gallery_items():
                 works = self.get_works_info()
-                return [
-                    {
-                        "path": w["path"],
-                        "name": w["name"]
-                    } for w in works
-                ]
+                return [w["path"] for w in works]  # 直接返回文件路径列表
 
             def select_video(evt: gr.SelectData):
                 # evt.value 是视频路径
