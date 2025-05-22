@@ -207,7 +207,8 @@ class HeyGemApp:
         """获取所有模特模型信息"""
         models = []
         for file in self.file_service.scan_models():
-            file_path = Path(file)
+            # 从字典中获取路径
+            file_path = Path(file["path"])
             models.append({
                 "name": file_path.stem,
                 "path": str(file_path),
