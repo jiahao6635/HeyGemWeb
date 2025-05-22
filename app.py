@@ -270,7 +270,7 @@ class HeyGemApp:
                     with gr.Column():
                         video_path_input = gr.Dropdown(
                             label="选择数字人模特",
-                            choices=[{"label": m["name"], "value": m["path"]} for m in self.get_models_info()],
+                            choices=[],
                             allow_custom_value=True,
                             value=None
                         )
@@ -311,7 +311,7 @@ class HeyGemApp:
 
             def get_models_dropdown():
                 models = self.get_models_info()
-                return [{"label": m["name"], "value": m["path"]} for m in models]
+                return gr.Dropdown.update(choices=[{"label": m["name"], "value": m["path"]} for m in models])
 
             def select_video(evt: gr.SelectData):
                 works = self.get_works_info()
@@ -344,11 +344,9 @@ class HeyGemApp:
             refresh_models_btn.click(get_models_items, None, models_gallery)
 
             # 初始化下拉框选项和列表
-            demo.load(
-                fn=[get_models_dropdown, get_gallery_items, get_models_items],
-                inputs=None,
-                outputs=[video_path_input, works_gallery, models_gallery]
-            )
+            demo.load(fn=get_models_dropdown,inputs=None,outputs=video_path_input)
+            demo.load(fn=get_gallery_items,inputs=None,outputs=works_gallery)
+            demo.load(fn=get_models_items,inputs=None,outputs=models_gallery)
 
             # 训练相关事件
             def on_training_complete(result):
