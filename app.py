@@ -246,8 +246,9 @@ class HeyGemApp:
                     with gr.Column():
                         video_path_input = gr.Dropdown(
                             label="选择数字人模特",
-                            choices=self.get_models_info(),  # 使用模特列表而不是上传的视频列表
-                            allow_custom_value=True
+                            choices=[],  # 初始化为空列表
+                            allow_custom_value=True,
+                            value=None  # 添加默认值
                         )
                         text_input = gr.Textbox(label="要合成的文本", lines=3)
                         generate_btn = gr.Button("生成视频")
@@ -286,7 +287,7 @@ class HeyGemApp:
 
             def get_models_dropdown():
                 models = self.get_models_info()
-                return [m["name"] for m in models]  # 只返回名称列表
+                return [{"label": m["name"], "value": m["path"]} for m in models]
 
             def select_video(evt: gr.SelectData):
                 return evt.value
@@ -313,6 +314,9 @@ class HeyGemApp:
             models_gallery.select(select_model, outputs=[selected_model, model_preview])
             download_model_btn.click(download_selected_model, inputs=selected_model, outputs=model_file)
             refresh_models_btn.click(get_models_items, None, models_gallery)
+
+            # 初始化下拉框选项
+            demo.load(get_models_dropdown, None, video_path_input)
 
             # 训练相关事件
             def on_training_complete(result):
@@ -341,11 +345,8 @@ class HeyGemApp:
             
             def generate_video(video_path, text, ref_audio, ref_text):
                 try:
-                    # 根据选择的模特名称找到对应的文件路径
-                    models = self.get_models_info()
-                    model_path = next((m["path"] for m in models if m["name"] == video_path), None)
-                    if not model_path:
-                        raise ValueError("找不到选中的模特文件")
+                    if not video_path:
+                        raise ValueError("请选择数字人模特")
                         
                     audio_path = self.audio_service.synthesize_audio(
                         text=text,
@@ -353,7 +354,7 @@ class HeyGemApp:
                         reference_text=ref_text
                     )
                     task_id = self.video_service.make_video(
-                        video_path=Path(model_path),
+                        video_path=Path(video_path),
                         audio_path=Path(audio_path)
                     )
                     return f"任务ID: {task_id}"
