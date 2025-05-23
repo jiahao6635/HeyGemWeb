@@ -246,10 +246,11 @@ class HeyGemApp:
                             label="我的作品",
                             show_label=True,
                             elem_id="works_gallery",
-                            columns=3,
+                            columns=4,
                             allow_preview=True,
-                            height=400,
-                            object_fit="contain"
+                            height="auto",
+                            object_fit="contain",
+                            min_width=160
                         )
                 with gr.Row():
                     refresh_btn = gr.Button("刷新作品列表")
@@ -263,10 +264,11 @@ class HeyGemApp:
                             label="我的数字模特",
                             show_label=True,
                             elem_id="models_gallery",
-                            columns=3,
+                            columns=4,
                             allow_preview=True,
-                            height=400,
-                            object_fit="contain"
+                            height="auto",
+                            object_fit="contain",
+                            min_width=160
                         )
                 with gr.Row():
                     refresh_models_btn = gr.Button("刷新模特列表")
