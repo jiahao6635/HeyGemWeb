@@ -104,6 +104,7 @@ class HeyGemApp:
                 username = gr.Textbox(label="用户名", placeholder="请输入用户名")
                 password = gr.Textbox(label="密码", placeholder="请输入密码", type="password")
                 login_btn = gr.Button("登录")
+                login_status = gr.Textbox(label="登录状态", interactive=False)
             # 主界面区
             with gr.Group(visible=False) as main_group:
                 gr.Markdown("# HeyGem数字人界面")
@@ -175,8 +176,12 @@ class HeyGemApp:
                             cleanup_output = gr.Textbox(label="清理结果", lines=10)
                 # --- 我的作品逻辑 ---
                 def get_gallery_items():
+                    if not self.current_user:
+                        return []
                     return [(w["path"], w["name"]) for w in self.get_works_info()]
                 def get_models_items():
+                    if not self.current_user:
+                        return []
                     return [(m["path"], m["name"]) for m in self.get_models_info()]
                 def select_video(evt: gr.SelectData):
                     works = self.get_works_info()
@@ -273,12 +278,13 @@ class HeyGemApp:
             def on_login(username, password):
                 success, msg = self.login(username, password)
                 if success:
-                    return True, gr.update(visible=False), gr.update(visible=True), username
-                return False, gr.update(visible=True), gr.update(visible=False), None
+                    return True, gr.update(visible=False), gr.update(visible=True), username, "登录成功"
+                # 登录失败，主界面不显示，提示错误
+                return False, gr.update(visible=True), gr.update(visible=False), None, msg
             login_btn.click(
                 fn=on_login,
                 inputs=[username, password],
-                outputs=[login_state, login_group, main_group, current_user_state]
+                outputs=[login_state, login_group, main_group, current_user_state, login_status]
             )
         return demo
 
@@ -352,6 +358,8 @@ class HeyGemApp:
         return self.file_service.scan_works(self.current_user)
 
     def get_works_info(self):
+        if not self.current_user:
+            return []
         works = []
         for file in self.file_service.scan_works(self.current_user):
             file_path = Path(file["path"]) if isinstance(file, dict) else Path(file)
@@ -364,6 +372,8 @@ class HeyGemApp:
         return works
 
     def get_models_info(self):
+        if not self.current_user:
+            return []
         models = []
         for file in self.file_service.scan_models(self.current_user):
             file_path = Path(file["path"])

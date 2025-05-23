@@ -66,6 +66,13 @@ nohup python3 app.py > /home/HeyGemWeb/logs/app.log 2>&1 &
 
 # 5. 检查运行状态
 ps -ef | grep python3 | grep app.py
+
+# 6. 停止运行
+kill $(ps -ef | grep python3 | grep app.py | awk '{print $2}')
+
+# 7. 查看实时日志
+tail -f /home/HeyGemWeb/logs/app.log
+
 ```
 
 ## 使用指南
