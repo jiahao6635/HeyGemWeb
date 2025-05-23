@@ -45,7 +45,7 @@ VALID_CREDENTIALS = {}
 for i in range(1, 11):  # 支持最多10个用户
     username = os.getenv(f'USER_{i}_NAME')
     password = os.getenv(f'USER_{i}_PASSWORD')
-    print(f"用户{i}：{username})
+    print(f"用户{i}：{username}")
     if username and password:
         VALID_CREDENTIALS[username] = password
 
