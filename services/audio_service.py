@@ -31,7 +31,9 @@ class AudioService:
 
             # 获取相对路径
             audio_path = Path(audio_path)
-            relative_path = audio_path.relative_to(TTS_TRAIN_DIR.parent)
+            # 兼容多用户：取audio_path的父目录（即TTS_TRAIN_DIR/用户名）
+            tts_train_root = TTS_TRAIN_DIR.parent
+            relative_path = audio_path.relative_to(tts_train_root)
             reference_audio = str(relative_path).replace('\\', '/')  # 确保使用正斜杠
 
             # 准备训练参数
@@ -69,7 +71,7 @@ class AudioService:
             return None
 
 
-    def synthesize_audio(self, text, reference_audio=None, reference_text=None):
+    def synthesize_audio(self, text, reference_audio=None, reference_text=None, username=None):
         """合成音频"""
         try:
             # 使用保存的训练结果或传入的参数
@@ -118,10 +120,14 @@ class AudioService:
             # 生成唯一的音频文件名
             timestamp = datetime.now().strftime('%Y%m%d%H%M%S%f')[:-3]
             audio_filename = f"audio_{timestamp}.wav"
-            audio_path = UPLOAD_DIR / audio_filename
-            
-            # 确保目录存在
-            UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            # 用户音频目录
+            if username:
+                user_audio_dir = UPLOAD_DIR / username
+                user_audio_dir.mkdir(parents=True, exist_ok=True)
+                audio_path = user_audio_dir / audio_filename
+            else:
+                UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+                audio_path = UPLOAD_DIR / audio_filename
             
             # 保存音频文件
             with open(audio_path, 'wb') as f:
@@ -129,7 +135,7 @@ class AudioService:
             
             logger.info(f"Audio saved to: {audio_path}")
             
-            return audio_filename
+            return str(audio_path)
         except requests.exceptions.HTTPError as e:
             logger.error(f"HTTP Error during synthesis: {str(e)}")
             logger.error(f"Response content: {e.response.text if hasattr(e, 'response') else 'No response content'}")

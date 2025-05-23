@@ -12,6 +12,16 @@ class FileService:
         self.upload_dir = upload_dir
         self.tts_train_dir = tts_train_dir
 
+    def get_user_dir(self, username: str) -> Path:
+        user_dir = self.upload_dir / username
+        user_dir.mkdir(parents=True, exist_ok=True)
+        return user_dir
+
+    def get_user_tts_dir(self, username: str) -> Path:
+        user_tts_dir = self.tts_train_dir / username
+        user_tts_dir.mkdir(parents=True, exist_ok=True)
+        return user_tts_dir
+
     def check_file_extension(self, filename: str) -> bool:
         """检查文件扩展名是否为MP4格式"""
         return Path(filename).suffix.lower() == '.mp4'
@@ -20,7 +30,7 @@ class FileService:
         """检查文件大小是否在限制范围内"""
         return file_size <= MAX_CONTENT_LENGTH
 
-    def save_uploaded_file(self, file, filename: str) -> Path:
+    def save_uploaded_file(self, file, filename: str, username: str) -> Path:
         """保存上传的文件"""
         if not self.check_file_extension(filename):
             raise ValueError("只支持MP4格式的视频文件")
@@ -35,7 +45,8 @@ class FileService:
         timestamp = datetime.now().strftime('%Y%m%d%H%M%S%f')[:-3]  # 格式：YYYYMMDDHHmmssSSS
         new_filename = f"{timestamp}{ext}"
         
-        file_path = self.upload_dir / new_filename
+        user_dir = self.get_user_dir(username)
+        file_path = user_dir / new_filename
         # 使用二进制模式复制文件
         with open(file.name, 'rb') as src, open(file_path, 'wb') as dst:
             dst.write(src.read())
@@ -44,12 +55,13 @@ class FileService:
         logger.info(f"File saved: {file_path}")
         return file_path
 
-    def get_audio_path(self, video_path: Path) -> Path:
+    def get_audio_path(self, video_path: Path, username: str) -> Path:
         """获取对应的音频文件路径"""
         # 使用相同的时间戳文件名，只改变扩展名
-        return self.tts_train_dir / f"{video_path.stem}.wav"
+        user_tts_dir = self.get_user_tts_dir(username)
+        return user_tts_dir / f"{video_path.stem}.wav"
 
-    def scan_uploaded_videos(self) -> list[str]:
+    def scan_uploaded_videos(self, username: str) -> list[str]:
         """扫描已上传的MP4视频文件
         
         Returns:
@@ -57,40 +69,40 @@ class FileService:
         """
         videos = []
         try:
-            # 确保目录存在
-            self.upload_dir.mkdir(parents=True, exist_ok=True)
-            
+            user_dir = self.get_user_dir(username)
             # 扫描目录下的所有MP4文件
-            for file_path in self.upload_dir.glob('*.mp4'):
+            for file_path in user_dir.glob('*.mp4'):
                 if file_path.is_file():
                     videos.append(str(file_path.name))
             
-            logger.info(f"Found {len(videos)} MP4 videos in {self.upload_dir}")
+            logger.info(f"Found {len(videos)} MP4 videos in {user_dir}")
             return videos
         except Exception as e:
             logger.error(f"Error scanning uploaded videos: {str(e)}")
             return []
 
-    def scan_works(self) -> List[dict]:
+    def scan_works(self, username: str) -> List[dict]:
         """扫描所有作品（以 -r.mp4 结尾）"""
         works = []
-        for file in self.upload_dir.glob("*-r.mp4"):
+        user_dir = self.get_user_dir(username)
+        for file in user_dir.glob("*-r.mp4"):
             file_info = self.get_file_info(file)
             if file_info:
                 works.append(file_info)
         return works
 
-    def scan_models(self) -> List[dict]:
+    def scan_models(self, username: str) -> List[dict]:
         """扫描所有模特模型"""
         models = []
-        for file in self.upload_dir.glob("*.mp4"):
+        user_dir = self.get_user_dir(username)
+        for file in user_dir.glob("*.mp4"):
             if not file.name.endswith("-r.mp4"):
                 file_info = self.get_file_info(file)
                 if file_info:
                     models.append(file_info)
         return models
 
-    def cleanup_temp_files(self, days_old: int = 7) -> dict:
+    def cleanup_temp_files(self, days_old: int = 7, username: str = None) -> dict:
         """清理临时文件
         
         Args:
@@ -112,35 +124,67 @@ class FileService:
         cutoff_time = time.time() - (days_old * 24 * 60 * 60)
         
         # 清理上传目录
-        for file_path in self.upload_dir.glob('*'):
-            try:
-                if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
-                    file_path.unlink()
-                    result['upload_dir']['deleted'] += 1
-            except Exception as e:
-                logger.error(f"删除文件失败 {file_path}: {str(e)}")
-                result['upload_dir']['failed'] += 1
-        
-        # 清理训练音频目录
-        for file_path in self.tts_train_dir.glob('*'):
-            try:
-                if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
-                    file_path.unlink()
-                    result['tts_train_dir']['deleted'] += 1
-            except Exception as e:
-                logger.error(f"删除文件失败 {file_path}: {str(e)}")
-                result['tts_train_dir']['failed'] += 1
-        
-        # 清理处理后的音频目录
-        tts_product_dir = self.tts_train_dir.parent / 'processed_audio'
-        for file_path in tts_product_dir.glob('*'):
-            try:
-                if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
-                    file_path.unlink()
-                    result['tts_product_dir']['deleted'] += 1
-            except Exception as e:
-                logger.error(f"删除文件失败 {file_path}: {str(e)}")
-                result['tts_product_dir']['failed'] += 1
+        if username:
+            user_dir = self.get_user_dir(username)
+            for file_path in user_dir.glob('*'):
+                try:
+                    if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
+                        file_path.unlink()
+                        result['upload_dir']['deleted'] += 1
+                except Exception as e:
+                    logger.error(f"删除文件失败 {file_path}: {str(e)}")
+                    result['upload_dir']['failed'] += 1
+            
+            # 清理训练音频目录
+            user_tts_dir = self.get_user_tts_dir(username)
+            for file_path in user_tts_dir.glob('*'):
+                try:
+                    if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
+                        file_path.unlink()
+                        result['tts_train_dir']['deleted'] += 1
+                except Exception as e:
+                    logger.error(f"删除文件失败 {file_path}: {str(e)}")
+                    result['tts_train_dir']['failed'] += 1
+            
+            # 清理处理后的音频目录
+            tts_product_dir = user_tts_dir.parent / 'processed_audio'
+            for file_path in tts_product_dir.glob('*'):
+                try:
+                    if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
+                        file_path.unlink()
+                        result['tts_product_dir']['deleted'] += 1
+                except Exception as e:
+                    logger.error(f"删除文件失败 {file_path}: {str(e)}")
+                    result['tts_product_dir']['failed'] += 1
+        else:
+            # 全局清理（管理员用）
+            for file_path in self.upload_dir.glob('*'):
+                try:
+                    if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
+                        file_path.unlink()
+                        result['upload_dir']['deleted'] += 1
+                except Exception as e:
+                    logger.error(f"删除文件失败 {file_path}: {str(e)}")
+                    result['upload_dir']['failed'] += 1
+            
+            for file_path in self.tts_train_dir.glob('*'):
+                try:
+                    if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
+                        file_path.unlink()
+                        result['tts_train_dir']['deleted'] += 1
+                except Exception as e:
+                    logger.error(f"删除文件失败 {file_path}: {str(e)}")
+                    result['tts_train_dir']['failed'] += 1
+            
+            tts_product_dir = self.tts_train_dir.parent / 'processed_audio'
+            for file_path in tts_product_dir.glob('*'):
+                try:
+                    if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
+                        file_path.unlink()
+                        result['tts_product_dir']['deleted'] += 1
+                except Exception as e:
+                    logger.error(f"删除文件失败 {file_path}: {str(e)}")
+                    result['tts_product_dir']['failed'] += 1
         
         return result 
 
