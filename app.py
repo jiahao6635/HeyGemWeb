@@ -98,6 +98,40 @@ class HeyGemApp:
             return True, "登录成功"
         return False, "用户名或密码错误"
 
+    def _move_video_to_user_dir(self, video_filename):
+        """移动视频文件到用户目录"""
+        try:
+            source_path = UPLOAD_DIR / video_filename
+            if not source_path.exists():
+                return False, f"视频文件不存在: {source_path}", None
+                
+            user_dir = self.file_service.get_user_dir(self.current_user)
+            target_path = user_dir / video_filename
+            source_path.rename(target_path)
+            return True, f"视频已保存到: {target_path}", target_path
+            
+        except Exception as e:
+            logger.error(f"移动视频文件失败: {str(e)}")
+            return False, f"移动视频文件失败: {str(e)}", None
+
+    def _cleanup_temp_images(self):
+        """清理临时图片文件"""
+        try:
+            cleaned_files = []
+            for temp_file in UPLOAD_DIR.glob("*.png"):
+                if temp_file.name.replace(".png", "").isdigit():
+                    temp_file.unlink()
+                    cleaned_files.append(temp_file.name)
+            
+            if cleaned_files:
+                logger.info(f"已清理临时图片文件: {', '.join(cleaned_files)}")
+                return True, f"已清理 {len(cleaned_files)} 个临时文件"
+            return True, "没有需要清理的临时文件"
+            
+        except Exception as e:
+            logger.error(f"清理临时图片文件失败: {str(e)}")
+            return False, f"清理临时文件失败: {str(e)}"
+
     def create_interface(self):
         with gr.Blocks(title="HeyGem数字人", css=custom_css) as demo:
             login_state = gr.State(value=False)
@@ -248,22 +282,41 @@ class HeyGemApp:
                         return f"错误: {str(e)}", "", None, None
                 def check_status_loop(task_id):
                     if not task_id:
-                        return "", None, None
+                        return ""
                     try:
                         status_data = self.video_service.check_status(task_id)
-                        if status_data.get('code') == 10000:
-                            data = status_data.get('data', {})
-                            if data.get('status') == 1:
-                                return f"进度: {data.get('progress')}%状态: 处理中", None, None
-                            elif data.get('status') == 2:
-                                video_path = data.get('result')
-                                return f"状态: 已完成,视频保存位置: {video_path}", video_path, video_path
-                            elif data.get('status') == 3:
-                                return f"状态: 失败,错误: {data.get('msg')}", None, None
-                        return f"状态: 未知,响应: {status_data}", None, None
+                        if status_data.get('code') != 10000:
+                            return f"状态: 未知,响应: {status_data}"
+                            
+                        data = status_data.get('data', {})
+                        status = data.get('status')
+                        
+                        if status == 1:
+                            progress = data.get('progress', 0)
+                            return f"进度: {progress}% 状态: 处理中"
+                            
+                        elif status == 2:
+                            video_filename = data.get('result')
+                            success, msg, target_path = self._move_video_to_user_dir(video_filename)
+                            if not success:
+                                return msg
+                                
+                            # 清理临时文件
+                            cleanup_success, cleanup_msg = self._cleanup_temp_images()
+                            if not cleanup_success:
+                                logger.warning(cleanup_msg)
+                                
+                            return msg
+                            
+                        elif status == 3:
+                            return f"状态: 失败,错误: {data.get('msg')}"
+                            
+                        return f"状态: 未知,响应: {status_data}"
+                        
                     except Exception as e:
-                        logger.error(f"状态检查过程中发生错误: {str(e)}")
-                        return f"状态检查过程中发生错误: {str(e)}", None, None
+                        logger.error(f"状态检查失败: {str(e)}")
+                        return f"状态检查失败: {str(e)}"
+                
                 generate_btn.click(
                     fn=generate_video,
                     inputs=[video_path_input, text_input, reference_audio, reference_text],
