@@ -102,6 +102,11 @@ class HeyGemApp:
         """移动视频文件到用户目录"""
         try:
             source_path = UPLOAD_DIR / video_filename
+            logger.info(f"UPLOAD_DIR: {UPLOAD_DIR}")
+            logger.info(f"video_filename: {video_filename}")
+            logger.info(f"完整源文件路径: {source_path}")
+            logger.info(f"源文件是否存在: {source_path.exists()}")
+            
             if not source_path.exists():
                 return False, f"视频文件不存在: {source_path}", None
                 
