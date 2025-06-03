@@ -101,6 +101,10 @@ class HeyGemApp:
     def _move_video_to_user_dir(self, video_filename):
         """移动视频文件到用户目录"""
         try:
+            # 如果video_filename是完整路径，只取文件名部分
+            if video_filename.startswith('/'):
+                video_filename = Path(video_filename).name
+                
             source_path = UPLOAD_DIR / video_filename
             logger.info(f"UPLOAD_DIR: {UPLOAD_DIR}")
             logger.info(f"video_filename: {video_filename}")
