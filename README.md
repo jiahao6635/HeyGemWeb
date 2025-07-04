@@ -14,38 +14,39 @@ HeyGem 是一个基于 Gradio 构建的 Web 界面，用于数字人视频的生
 ## 待办清单
 
 ### 1. 界面优化
-- [ ] 优化整体UI/UX设计
-- [ ] 改进响应式布局
-- [ ] 统一设计风格
-- [ ] 优化移动端适配
-- [ ] 增加深色模式支持
+- [x] 优化整体UI/UX设计
+- [x] 改进响应式布局
+- [x] 统一设计风格
+- [x] 优化移动端适配
+- [x] 增加深色模式支持
 
 ### 2. 任务队列系统
-- [ ] 实现任务队列管理
-- [ ] 添加任务优先级
-- [ ] 支持任务状态追踪
-- [ ] 实现任务取消功能
-- [ ] 添加队列状态监控
-- [ ] 优化资源分配策略
+- [x] 实现任务队列管理
+- [x] 添加任务优先级
+- [x] 支持任务状态追踪
+- [x] 实现任务取消功能
+- [x] 添加队列状态监控
+- [x] 优化资源分配策略
 
 ### 3. 性能优化
-- [ ] 实现任务并发控制
-- [ ] 优化资源使用效率
-- [ ] 添加任务超时处理
-- [ ] 实现失败任务重试机制
-- [ ] 优化大文件处理性能
+- [x] 实现任务并发控制
+- [x] 优化资源使用效率
+- [x] 添加任务超时处理
+- [x] 实现失败任务重试机制
+- [x] 优化大文件处理性能
 
 ### 4. 用户体验
-- [ ] 添加任务进度实时显示
-- [ ] 优化错误提示信息
-- [ ] 增加操作引导
-- [ ] 完善帮助文档
-- [ ] 添加用户反馈功能
+- [x] 添加任务进度实时显示
+- [x] 优化错误提示信息
+- [x] 增加操作引导
+- [x] 完善帮助文档
+- [x] 添加用户反馈功能
 
+> **优化完成**：所有计划的优化任务已全部完成！系统现在具有更好的用户界面、高效的任务队列管理、优化的性能和改进的用户体验。
 
 ## 系统要求
 
-- Python 3.8+
+- Python 3.10+（注：Python 3.8 和 3.9 可能会出现错误，推荐使用 3.10 及以上版本）
 - 足够的存储空间用于视频处理
 - 支持的操作系统：Windows、Linux、macOS
 
@@ -57,7 +58,7 @@ HeyGem 是一个基于 Gradio 构建的 Web 界面，用于数字人视频的生
 # 克隆项目
 git clone [项目地址]
 # 创建虚拟环境
-python3 -m venv venv
+python3.10 -m venv venv
 
 source venv/bin/activate
 # 安装依赖
@@ -79,7 +80,7 @@ SERVER_PORT = 2531      # 服务器端口
 
 #### 本地开发环境
 ```bash
-python app.py
+python3.10 app.py
 ```
 
 #### Linux 服务器部署
@@ -94,13 +95,13 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # 4. 后台运行
-nohup python3 app.py > /home/HeyGemWeb/logs/app.log 2>&1 &
+nohup python3.10 app.py > /home/HeyGemWeb/logs/app.log 2>&1 &
 
 # 5. 检查运行状态
-ps -ef | grep python3 | grep app.py
+ps -ef | grep python3.10 | grep app.py
 
 # 6. 停止运行
-kill $(ps -ef | grep python3 | grep app.py | awk '{print $2}')
+kill $(ps -ef | grep python3.10 | grep app.py | awk '{print $2}')
 
 # 7. 查看实时日志
 tail -f /home/HeyGemWeb/logs/app.log
@@ -183,6 +184,11 @@ tail -f /home/HeyGemWeb/logs/app.log
    - 确认模型是否训练完成
    - 检查文本内容是否合适
    - 查看任务状态和错误信息
+
+4. **Python版本问题**
+   - 使用Python 3.10+版本运行程序
+   - Python 3.8和3.9版本可能会出现兼容性错误
+   - 如使用其他版本出现问题，请查看日志详细错误信息
 
 ## 技术支持
 

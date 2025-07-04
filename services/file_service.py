@@ -1,9 +1,13 @@
 import logging
 import os
+import shutil
+import tempfile
+import threading
+import concurrent.futures
 from pathlib import Path
 from datetime import datetime
 from config import UPLOAD_DIR, TTS_TRAIN_DIR, ALLOWED_EXTENSIONS, MAX_CONTENT_LENGTH
-from typing import List
+from typing import List, Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -47,13 +51,39 @@ class FileService:
         
         user_dir = self.get_user_dir(username)
         file_path = user_dir / new_filename
-        # 使用二进制模式复制文件
-        with open(file.name, 'rb') as src, open(file_path, 'wb') as dst:
-            dst.write(src.read())
+        
+        # 对于大文件，使用分块复制
+        if file_size > 100 * 1024 * 1024:  # 100MB
+            self._copy_large_file(file.name, file_path)
+        else:
+            # 使用二进制模式复制文件
+            with open(file.name, 'rb') as src, open(file_path, 'wb') as dst:
+                dst.write(src.read())
             
         os.chmod(file_path, 0o644)
         logger.info(f"File saved: {file_path}")
         return file_path
+
+    def _copy_large_file(self, src_path: str, dst_path: Path, chunk_size: int = 8 * 1024 * 1024):
+        """分块复制大文件，减少内存占用"""
+        logger.info(f"使用分块复制处理大文件: {src_path} -> {dst_path}")
+        
+        try:
+            with open(src_path, 'rb') as src, open(dst_path, 'wb') as dst:
+                while True:
+                    chunk = src.read(chunk_size)  # 每次读取8MB
+                    if not chunk:
+                        break
+                    dst.write(chunk)
+        except Exception as e:
+            logger.error(f"分块复制文件失败: {str(e)}")
+            # 如果复制失败，尝试删除目标文件
+            if dst_path.exists():
+                try:
+                    dst_path.unlink()
+                except:
+                    pass
+            raise
 
     def get_audio_path(self, video_path: Path, username: str) -> Path:
         """获取对应的音频文件路径"""
@@ -123,70 +153,47 @@ class FileService:
         # 计算截止时间
         cutoff_time = time.time() - (days_old * 24 * 60 * 60)
         
-        # 清理上传目录
-        if username:
-            user_dir = self.get_user_dir(username)
-            for file_path in user_dir.glob('*'):
-                try:
-                    if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
-                        file_path.unlink()
-                        result['upload_dir']['deleted'] += 1
-                except Exception as e:
-                    logger.error(f"删除文件失败 {file_path}: {str(e)}")
-                    result['upload_dir']['failed'] += 1
+        # 使用线程池进行并行清理
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            futures = []
             
-            # 清理训练音频目录
-            user_tts_dir = self.get_user_tts_dir(username)
-            for file_path in user_tts_dir.glob('*'):
-                try:
-                    if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
-                        file_path.unlink()
-                        result['tts_train_dir']['deleted'] += 1
-                except Exception as e:
-                    logger.error(f"删除文件失败 {file_path}: {str(e)}")
-                    result['tts_train_dir']['failed'] += 1
+            if username:
+                # 清理用户目录
+                user_dir = self.get_user_dir(username)
+                futures.append(executor.submit(self._cleanup_directory, user_dir, cutoff_time, 'upload_dir', result))
+                
+                # 清理训练音频目录
+                user_tts_dir = self.get_user_tts_dir(username)
+                futures.append(executor.submit(self._cleanup_directory, user_tts_dir, cutoff_time, 'tts_train_dir', result))
+                
+                # 清理处理后的音频目录
+                tts_product_dir = user_tts_dir.parent / 'processed_audio'
+                futures.append(executor.submit(self._cleanup_directory, tts_product_dir, cutoff_time, 'tts_product_dir', result))
+            else:
+                # 全局清理（管理员用）
+                futures.append(executor.submit(self._cleanup_directory, self.upload_dir, cutoff_time, 'upload_dir', result))
+                futures.append(executor.submit(self._cleanup_directory, self.tts_train_dir, cutoff_time, 'tts_train_dir', result))
+                tts_product_dir = self.tts_train_dir.parent / 'processed_audio'
+                futures.append(executor.submit(self._cleanup_directory, tts_product_dir, cutoff_time, 'tts_product_dir', result))
             
-            # 清理处理后的音频目录
-            tts_product_dir = user_tts_dir.parent / 'processed_audio'
-            for file_path in tts_product_dir.glob('*'):
-                try:
-                    if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
-                        file_path.unlink()
-                        result['tts_product_dir']['deleted'] += 1
-                except Exception as e:
-                    logger.error(f"删除文件失败 {file_path}: {str(e)}")
-                    result['tts_product_dir']['failed'] += 1
-        else:
-            # 全局清理（管理员用）
-            for file_path in self.upload_dir.glob('*'):
-                try:
-                    if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
-                        file_path.unlink()
-                        result['upload_dir']['deleted'] += 1
-                except Exception as e:
-                    logger.error(f"删除文件失败 {file_path}: {str(e)}")
-                    result['upload_dir']['failed'] += 1
-            
-            for file_path in self.tts_train_dir.glob('*'):
-                try:
-                    if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
-                        file_path.unlink()
-                        result['tts_train_dir']['deleted'] += 1
-                except Exception as e:
-                    logger.error(f"删除文件失败 {file_path}: {str(e)}")
-                    result['tts_train_dir']['failed'] += 1
-            
-            tts_product_dir = self.tts_train_dir.parent / 'processed_audio'
-            for file_path in tts_product_dir.glob('*'):
-                try:
-                    if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
-                        file_path.unlink()
-                        result['tts_product_dir']['deleted'] += 1
-                except Exception as e:
-                    logger.error(f"删除文件失败 {file_path}: {str(e)}")
-                    result['tts_product_dir']['failed'] += 1
+            # 等待所有清理任务完成
+            concurrent.futures.wait(futures)
         
-        return result 
+        return result
+
+    def _cleanup_directory(self, directory: Path, cutoff_time: float, result_key: str, result: Dict[str, Dict[str, int]]):
+        """清理指定目录中的过期文件"""
+        try:
+            for file_path in directory.glob('*'):
+                try:
+                    if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
+                        file_path.unlink()
+                        result[result_key]['deleted'] += 1
+                except Exception as e:
+                    logger.error(f"删除文件失败 {file_path}: {str(e)}")
+                    result[result_key]['failed'] += 1
+        except Exception as e:
+            logger.error(f"清理目录失败 {directory}: {str(e)}")
 
     def get_file_info(self, file_path: Path) -> dict:
         """获取文件信息"""
