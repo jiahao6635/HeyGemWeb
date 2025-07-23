@@ -447,7 +447,7 @@ class HeyGemApp:
                             
                             # 添加进度条
                             with gr.Row():
-                                progress_bar = gr.Progress(label="任务进度", show_progress=True)
+                                progress_bar = gr.Progress()
                                 auto_refresh = gr.Checkbox(label="自动刷新状态", value=True)
                             
                             check_status_btn = gr.Button("检查状态")
@@ -650,18 +650,7 @@ class HeyGemApp:
                 theme_btn.click(
                     fn=toggle_theme,
                     inputs=[theme_state],
-                    outputs=[theme_state],
-                    _js="""
-                    function toggleTheme(theme) {
-                        if (theme === "light") {
-                            document.documentElement.classList.add('dark-theme');
-                            return "dark";
-                        } else {
-                            document.documentElement.classList.remove('dark-theme');
-                            return "light";
-                        }
-                    }
-                    """
+                    outputs=[theme_state]
                 )
                 
                 # --- 我的作品逻辑 ---
@@ -777,8 +766,8 @@ class HeyGemApp:
                         return status
                     return status_output.value
                 
-                # 每5秒自动刷新一次状态
-                demo.load(fn=auto_refresh_status, inputs=None, outputs=status_output, every=5)
+                # 自动刷新状态（移除every参数，因为新版本Gradio不支持）
+                demo.load(fn=auto_refresh_status, inputs=None, outputs=status_output)
                 
                 generate_btn.click(
                     fn=generate_video,
@@ -1047,9 +1036,16 @@ class HeyGemApp:
 
 def main():
     try:
+        print("开始启动HeyGem Web界面...")
         logger.info("启动HeyGem Web界面")
+        
+        print("创建HeyGemApp实例...")
         app = HeyGemApp()
+        
+        print("创建Gradio界面...")
         demo = app.create_interface()
+        
+        print(f"启动Gradio服务器，地址: {SERVER_HOST}:{SERVER_PORT}")
         demo.launch(
             server_name=SERVER_HOST,
             server_port=SERVER_PORT,
@@ -1057,7 +1053,10 @@ def main():
             favicon_path=None
         )
     except Exception as e:
+        print(f"程序启动失败: {str(e)}")
         logger.error(f"程序启动失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
     finally:
         # 确保停止任务队列服务
         if 'app' in locals() and hasattr(app, 'task_service'):
