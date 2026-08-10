@@ -514,7 +514,13 @@ class TaskQueue:
                                 self.save_tasks()
                             else:
                                 # 超过最大重试次数，标记为失败
-                                self.update_task_progress(task.task_id, 0.0, error=f"{str(e)}，已重试 {task.retry_count} 次")
+                                task.status = TaskStatus.FAILED
+                                task.completed_at = datetime.now()
+                                task.error = f"{str(e)}，已重试 {task.retry_count} 次"
+                                self.completed_tasks[task.task_id] = task
+                                self._release_resources(task)
+                                del self.active_tasks[task.task_id]
+                                self.save_tasks()
                 else:
                     # 没有回调的任务直接标记为完成
                     self.update_task_progress(task.task_id, 100.0)
@@ -585,4 +591,4 @@ class TaskService:
         
     def set_max_concurrent_tasks(self, count: int) -> bool:
         """设置最大并发任务数"""
-        return self.task_queue.set_max_concurrent_tasks(count) 
+        return self.task_queue.set_max_concurrent_tasks(count)

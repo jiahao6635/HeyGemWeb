@@ -4,15 +4,13 @@ from pathlib import Path
 # 判断操作系统类型
 IS_WINDOWS = os.name == 'nt'
 
-# API endpoints - 所有服务都在同一台机器上，使用localhost
-TTS_URL = "http://localhost:18180"  # 语音服务
-VIDEO_URL = "http://localhost:8383"  # 视频服务基础URL
+# API endpoints - 默认服务位于本机，可通过环境变量覆盖
+TTS_URL = os.getenv("HEYGEM_TTS_URL", "http://localhost:18180").rstrip("/")
+VIDEO_URL = os.getenv("HEYGEM_VIDEO_URL", "http://localhost:8383").rstrip("/")
 
-# File paths - 根据操作系统选择基础目录
-if IS_WINDOWS:
-    BASE_DIR = Path("D:/opt/heygem")  # Windows环境下的部署目录
-else:
-    BASE_DIR = Path("/root/heygem_data")  # Linux环境下的部署目录
+# File paths - 保留原有默认路径，同时允许部署和测试环境安全覆盖
+DEFAULT_BASE_DIR = Path("D:/opt/heygem") if IS_WINDOWS else Path("/root/heygem_data")
+BASE_DIR = Path(os.getenv("HEYGEM_BASE_DIR", str(DEFAULT_BASE_DIR))).expanduser().resolve()
 
 UPLOAD_DIR = BASE_DIR / "face2face/temp"  # 模特视频
 OUTPUT_DIR = BASE_DIR / "face2face/result"  # 输出视频
@@ -31,12 +29,12 @@ for directory in [UPLOAD_DIR, OUTPUT_DIR, TTS_DIR, TTS_TRAIN_DIR, TTS_PRODUCT_DI
 ALLOWED_EXTENSIONS = {'.mp4'}
 
 # Server configuration
-SERVER_HOST = "0.0.0.0"  # 允许外部访问
-SERVER_PORT = 2531  # Gradio服务端口
+SERVER_HOST = os.getenv("HEYGEM_HOST", "0.0.0.0")
+SERVER_PORT = int(os.getenv("HEYGEM_PORT", "2531"))
 
 # Logging configuration
 LOG_FILE = LOG_DIR / "heygem_web.log"
-LOG_LEVEL = "INFO"
+LOG_LEVEL = os.getenv("HEYGEM_LOG_LEVEL", "INFO").upper()
 
 # Security settings
-MAX_CONTENT_LENGTH = 500 * 1024 * 1024  # 500MB max file size 
+MAX_CONTENT_LENGTH = int(os.getenv("HEYGEM_MAX_UPLOAD_MB", "500")) * 1024 * 1024

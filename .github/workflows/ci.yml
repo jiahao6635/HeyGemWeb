@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      HEYGEM_BASE_DIR: ${{ runner.temp }}/heygem-data
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Check dependency consistency
+        run: python -m pip check
+
+      - name: Smoke-check imports
+        run: python -c "import gradio, requests, dotenv, numpy, PIL; import config; import services.file_service; import services.task_service; import app"
+
+      - name: Build Gradio interface
+        env:
+          USER_1_NAME: ci-user
+          USER_1_PASSWORD: ci-password-not-for-production
+        run: |
+          python - <<'PY'
+          from app import HeyGemApp
+
+          instance = HeyGemApp()
+          try:
+              interface = instance.create_interface()
+              assert interface is not None
+          finally:
+              instance.task_service.stop()
+          PY
+
+      - name: Compile Python sources
+        run: python -m compileall -q app.py config.py services tests
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Validate shell scripts
+        run: bash -n deploy.sh manage.sh

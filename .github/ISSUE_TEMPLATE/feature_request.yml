@@ -1,0 +1,33 @@
+name: Feature request
+description: Propose a focused improvement for HeyGemWeb
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: What self-hosted workflow is difficult today, and who experiences it?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the smallest useful behavior, including backend or deployment assumptions.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope confirmation
+      options:
+        - label: This request concerns HeyGemWeb rather than a separately deployed backend or model.
+          required: true

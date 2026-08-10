@@ -1,0 +1,70 @@
+name: Bug report
+description: Report a reproducible problem in HeyGemWeb
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve HeyGemWeb. Remove credentials, private URLs, personal media, and access tokens before submitting.
+
+  - type: input
+    id: version
+    attributes:
+      label: HeyGemWeb revision
+      description: Commit SHA or the date you cloned/pulled the repository.
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, Python version, Gradio version, and deployment method.
+      placeholder: Ubuntu 24.04, Python 3.10.14, Gradio 5.x, venv
+    validations:
+      required: true
+
+  - type: textarea
+    id: backend
+    attributes:
+      label: Backend information
+      description: Describe the compatible TTS/video backend versions and whether ports 18180/8383 are reachable. Do not include private URLs or tokens.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Configure ...
+        2. Run ...
+        3. Click ...
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted logs
+      description: Include the smallest useful excerpt after removing credentials, private paths, URLs, and personal data.
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I removed credentials, tokens, private URLs, personal media, and other sensitive data.
+          required: true
+        - label: I searched existing issues for the same problem.
+          required: true

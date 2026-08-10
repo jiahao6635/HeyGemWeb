@@ -4,6 +4,9 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.coverage
+.pytest_cache/
+.ruff_cache/
 .eggs/
 .venv/
 *.egg-info/
@@ -23,4 +26,4 @@ node_modules/
 .vscode/
 *.swp
 *.swo
-.DS_Store 
+.DS_Store

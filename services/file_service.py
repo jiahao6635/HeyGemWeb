@@ -6,25 +6,52 @@ import threading
 import concurrent.futures
 from pathlib import Path
 from datetime import datetime
-from config import UPLOAD_DIR, TTS_TRAIN_DIR, ALLOWED_EXTENSIONS, MAX_CONTENT_LENGTH
+from config import (
+    UPLOAD_DIR,
+    TTS_TRAIN_DIR,
+    TTS_PRODUCT_DIR,
+    ALLOWED_EXTENSIONS,
+    MAX_CONTENT_LENGTH,
+)
 from typing import List, Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 class FileService:
-    def __init__(self, upload_dir: Path = UPLOAD_DIR, tts_train_dir: Path = TTS_TRAIN_DIR):
+    def __init__(
+        self,
+        upload_dir: Path = UPLOAD_DIR,
+        tts_train_dir: Path = TTS_TRAIN_DIR,
+        tts_product_dir: Path = TTS_PRODUCT_DIR,
+    ):
         self.upload_dir = upload_dir
         self.tts_train_dir = tts_train_dir
+        self.tts_product_dir = tts_product_dir
+
+    @staticmethod
+    def _get_safe_user_dir(base_dir: Path, username: str) -> Path:
+        """Return a single-user directory without allowing path traversal."""
+        if not username or username.strip() == "":
+            raise ValueError("用户名不能为空")
+        if username in {".", ".."} or "/" in username or "\\" in username:
+            raise ValueError("用户名包含不安全的路径字符")
+
+        resolved_base = base_dir.resolve()
+        resolved_user_dir = (resolved_base / username).resolve()
+        if resolved_user_dir.parent != resolved_base:
+            raise ValueError("用户名不能指向用户目录之外")
+
+        resolved_user_dir.mkdir(parents=True, exist_ok=True)
+        return resolved_user_dir
 
     def get_user_dir(self, username: str) -> Path:
-        user_dir = self.upload_dir / username
-        user_dir.mkdir(parents=True, exist_ok=True)
-        return user_dir
+        return self._get_safe_user_dir(self.upload_dir, username)
 
     def get_user_tts_dir(self, username: str) -> Path:
-        user_tts_dir = self.tts_train_dir / username
-        user_tts_dir.mkdir(parents=True, exist_ok=True)
-        return user_tts_dir
+        return self._get_safe_user_dir(self.tts_train_dir, username)
+
+    def get_user_tts_product_dir(self, username: str) -> Path:
+        return self._get_safe_user_dir(self.tts_product_dir, username)
 
     def check_file_extension(self, filename: str) -> bool:
         """检查文件扩展名是否为MP4格式"""
@@ -39,8 +66,11 @@ class FileService:
         if not self.check_file_extension(filename):
             raise ValueError("只支持MP4格式的视频文件")
 
-        # 获取文件大小
-        file_size = os.path.getsize(file.name)
+        source_path = Path(getattr(file, "name", file))
+        if not source_path.is_file():
+            raise FileNotFoundError(f"上传文件不存在: {source_path}")
+
+        file_size = source_path.stat().st_size
         if not self.check_file_size(file_size):
             raise ValueError(f"文件大小超过限制 {MAX_CONTENT_LENGTH // (1024*1024)}MB")
 
@@ -54,13 +84,14 @@ class FileService:
         
         # 对于大文件，使用分块复制
         if file_size > 100 * 1024 * 1024:  # 100MB
-            self._copy_large_file(file.name, file_path)
+            self._copy_large_file(str(source_path), file_path)
         else:
             # 使用二进制模式复制文件
-            with open(file.name, 'rb') as src, open(file_path, 'wb') as dst:
+            with open(source_path, 'rb') as src, open(file_path, 'wb') as dst:
                 dst.write(src.read())
             
-        os.chmod(file_path, 0o644)
+        if os.name != "nt":
+            os.chmod(file_path, 0o644)
         logger.info(f"File saved: {file_path}")
         return file_path
 
@@ -167,14 +198,13 @@ class FileService:
                 futures.append(executor.submit(self._cleanup_directory, user_tts_dir, cutoff_time, 'tts_train_dir', result))
                 
                 # 清理处理后的音频目录
-                tts_product_dir = user_tts_dir.parent / 'processed_audio'
+                tts_product_dir = self.get_user_tts_product_dir(username)
                 futures.append(executor.submit(self._cleanup_directory, tts_product_dir, cutoff_time, 'tts_product_dir', result))
             else:
                 # 全局清理（管理员用）
                 futures.append(executor.submit(self._cleanup_directory, self.upload_dir, cutoff_time, 'upload_dir', result))
                 futures.append(executor.submit(self._cleanup_directory, self.tts_train_dir, cutoff_time, 'tts_train_dir', result))
-                tts_product_dir = self.tts_train_dir.parent / 'processed_audio'
-                futures.append(executor.submit(self._cleanup_directory, tts_product_dir, cutoff_time, 'tts_product_dir', result))
+                futures.append(executor.submit(self._cleanup_directory, self.tts_product_dir, cutoff_time, 'tts_product_dir', result))
             
             # 等待所有清理任务完成
             concurrent.futures.wait(futures)
@@ -230,4 +260,4 @@ class FileService:
             return None
         except Exception as e:
             logger.error(f"生成缩略图失败: {str(e)}")
-            return None 
+            return None

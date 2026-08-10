@@ -1,91 +1,132 @@
-import os
-import json
-import requests
 import logging
-from pathlib import Path
-from config import TTS_URL, VIDEO_URL, TTS_TRAIN_DIR, UPLOAD_DIR
+import subprocess
 from datetime import datetime
+from pathlib import Path
+
+import requests
+
+from config import TTS_URL, TTS_TRAIN_DIR, UPLOAD_DIR
+
 
 logger = logging.getLogger(__name__)
 
+
 class AudioService:
-    def __init__(self):
-        self.training_result = None
+    def __init__(self, request_timeout=(5, 120)):
+        self.request_timeout = request_timeout
+
+    @staticmethod
+    def _safe_user_output_dir(username: str) -> Path:
+        if not username:
+            raise ValueError("Username is required")
+
+        upload_root = Path(UPLOAD_DIR).resolve()
+        user_dir = (upload_root / username).resolve()
+        if user_dir.parent != upload_root:
+            raise ValueError("Unsafe username path")
+        user_dir.mkdir(parents=True, exist_ok=True)
+        return user_dir
+
+    @staticmethod
+    def _require_training_result(payload) -> dict:
+        if not isinstance(payload, dict):
+            raise ValueError("TTS preprocessing returned an invalid payload")
+
+        reference_audio = payload.get("asr_format_audio_url")
+        reference_text = payload.get("reference_audio_text")
+        if not isinstance(reference_audio, str) or not reference_audio.strip():
+            raise ValueError("TTS preprocessing did not return asr_format_audio_url")
+        if not isinstance(reference_text, str) or not reference_text.strip():
+            raise ValueError("TTS preprocessing did not return reference_audio_text")
+        return payload
+
+    @staticmethod
+    def _require_wav_bytes(audio_data: bytes) -> bytes:
+        if (
+            not isinstance(audio_data, (bytes, bytearray))
+            or len(audio_data) < 12
+            or audio_data[:4] not in {b"RIFF", b"RF64"}
+            or audio_data[8:12] != b"WAVE"
+        ):
+            raise ValueError("TTS synthesis did not return a valid WAV response")
+        return bytes(audio_data)
 
     def extract_audio(self, video_path, audio_path):
-        """从视频中提取音频"""
+        """Extract a WAV reference track with ffmpeg."""
+        video_path = Path(video_path)
+        audio_path = Path(audio_path)
+        if not video_path.is_file():
+            raise FileNotFoundError(f"Video file not found: {video_path}")
+
+        audio_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            # 使用ffmpeg提取音频
-            os.system(f'ffmpeg -i "{video_path}" -vn -acodec pcm_s16le -ar 44100 -ac 2 "{audio_path}"')
-            return os.path.exists(audio_path)
-        except Exception as e:
-            logger.error(f"Error extracting audio: {str(e)}")
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-i",
+                    str(video_path),
+                    "-vn",
+                    "-acodec",
+                    "pcm_s16le",
+                    "-ar",
+                    "44100",
+                    "-ac",
+                    "2",
+                    "-y",
+                    str(audio_path),
+                ],
+                check=True,
+                capture_output=True,
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+            logger.error("Audio extraction failed: %s", exc)
             return False
+        return audio_path.is_file()
 
     def train_voice_model(self, audio_path):
-        """训练语音模型"""
+        """Call the configured TTS preprocessing endpoint and validate its contract."""
+        audio_path = Path(audio_path)
+        if not audio_path.is_file():
+            raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
+        tts_train_root = Path(TTS_TRAIN_DIR).parent.resolve()
         try:
-            # 确保音频文件存在
-            if not os.path.exists(audio_path):
-                raise FileNotFoundError(f"Audio file not found: {audio_path}")
+            relative_path = audio_path.resolve().relative_to(tts_train_root)
+        except ValueError as exc:
+            raise ValueError("Reference audio must be stored below the configured TTS data directory") from exc
 
-            # 获取相对路径
-            audio_path = Path(audio_path)
-            # 兼容多用户：取audio_path的父目录（即TTS_TRAIN_DIR/用户名）
-            tts_train_root = TTS_TRAIN_DIR.parent
-            relative_path = audio_path.relative_to(tts_train_root)
-            reference_audio = str(relative_path).replace('\\', '/')  # 确保使用正斜杠
-
-            # 准备训练参数
-            data = {
+        response = requests.post(
+            f"{TTS_URL}/v1/preprocess_and_tran",
+            json={
                 "format": "wav",
-                "reference_audio": reference_audio,
-                "lang": "zh"
-            }
-
-            logger.info(f"Sending training request with data: {data}")
-
-            # 发送训练请求
-            response = requests.post(
-                f"{TTS_URL}/v1/preprocess_and_tran",
-                json=data,
-                headers={"Content-Type": "application/json"}
-            )
-            
-            # 记录响应内容以便调试
-            logger.info(f"Training response status: {response.status_code}")
-            logger.info(f"Training response content: {response.text}")
-            
-            response.raise_for_status()
-            
-            # 保存训练结果
-            result = response.json()
-            self.training_result = result
-            return result
-        except requests.exceptions.HTTPError as e:
-            logger.error(f"HTTP Error during training: {str(e)}")
-            logger.error(f"Response content: {e.response.text if hasattr(e, 'response') else 'No response content'}")
-            return None
-        except Exception as e:
-            logger.error(f"Error training voice model: {str(e)}")
-            return None
-
-
-    def synthesize_audio(self, text, reference_audio=None, reference_text=None, username=None):
-        """合成音频"""
+                "reference_audio": str(relative_path).replace("\\", "/"),
+                "lang": "zh",
+            },
+            headers={"Content-Type": "application/json"},
+            timeout=self.request_timeout,
+        )
+        response.raise_for_status()
         try:
-            # 使用保存的训练结果或传入的参数
-            ref_audio = reference_audio or (self.training_result.get('asr_format_audio_url') if self.training_result else None)
-            ref_text = reference_text or (self.training_result.get('reference_audio_text') if self.training_result else None)
+            payload = response.json()
+        except ValueError as exc:
+            raise ValueError("TTS preprocessing returned invalid JSON") from exc
+        return self._require_training_result(payload)
 
-            if not ref_audio or not ref_text:
-                raise ValueError("Missing reference audio or text")
+    def synthesize_audio(self, text, reference_audio, reference_text, username):
+        """Call the configured TTS endpoint and save a validated WAV response."""
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("Text is required")
+        if not isinstance(reference_audio, str) or not reference_audio.strip():
+            raise ValueError("Reference audio is required")
+        if not isinstance(reference_text, str) or not reference_text.strip():
+            raise ValueError("Reference text is required")
 
-            # 准备合成参数
-            data = {
+        response = requests.post(
+            f"{TTS_URL}/v1/invoke",
+            json={
                 "text": text,
-                "reference_audio": ref_audio,
-                "reference_text": ref_text,
+                "reference_audio": reference_audio,
+                "reference_text": reference_text,
                 "format": "wav",
                 "topP": 0.7,
                 "max_new_tokens": 1024,
@@ -95,51 +136,19 @@ class AudioService:
                 "need_asr": False,
                 "streaming": False,
                 "is_fixed_seed": 0,
-                "is_norm": 0
-            }
+                "is_norm": 0,
+            },
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "audio/wav",
+            },
+            timeout=self.request_timeout,
+        )
+        response.raise_for_status()
+        audio_data = self._require_wav_bytes(response.content)
 
-            logger.info(f"Sending synthesis request with data: {data}")
-
-            # 发送合成请求，设置stream=True以获取二进制数据
-            response = requests.post(
-                f"{TTS_URL}/v1/invoke",
-                json=data,
-                headers={
-                    "Content-Type": "application/json",
-                    "Accept": "audio/wav"  # 指定接受音频数据
-                },
-                stream=True  # 启用流式传输
-            )
-            
-            # 检查HTTP响应状态码，如果状态码不是200-299之间的值，将抛出HTTPError异常
-            response.raise_for_status()
-            
-            # 获取音频数据（二进制数据）
-            audio_data = response.raw.read()
-            
-            # 生成唯一的音频文件名
-            timestamp = datetime.now().strftime('%Y%m%d%H%M%S%f')[:-3]
-            audio_filename = f"audio_{timestamp}.wav"
-            # 用户音频目录
-            if username:
-                user_audio_dir = UPLOAD_DIR / username
-                user_audio_dir.mkdir(parents=True, exist_ok=True)
-                audio_path = user_audio_dir / audio_filename
-            else:
-                UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-                audio_path = UPLOAD_DIR / audio_filename
-            
-            # 保存音频文件
-            with open(audio_path, 'wb') as f:
-                f.write(audio_data)
-            
-            logger.info(f"Audio saved to: {audio_path}")
-            
-            return str(audio_path)
-        except requests.exceptions.HTTPError as e:
-            logger.error(f"HTTP Error during synthesis: {str(e)}")
-            logger.error(f"Response content: {e.response.text if hasattr(e, 'response') else 'No response content'}")
-            raise
-        except Exception as e:
-            logger.error(f"Error synthesizing audio: {str(e)}")
-            raise 
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
+        audio_path = self._safe_user_output_dir(username) / f"audio_{timestamp}.wav"
+        audio_path.write_bytes(audio_data)
+        logger.info("Synthesized audio saved for user %s", username)
+        return str(audio_path)

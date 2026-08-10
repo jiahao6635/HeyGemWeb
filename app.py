@@ -3,9 +3,8 @@ load_dotenv()
 
 import logging
 import gradio as gr
-import uuid
 import os
-import time
+import threading
 
 from pathlib import Path
 from config import (
@@ -14,13 +13,14 @@ from config import (
     LOG_FILE,
     LOG_LEVEL,
     LOG_DIR,
-    UPLOAD_DIR
+    UPLOAD_DIR,
+    OUTPUT_DIR,
+    BASE_DIR,
 )
 from services.audio_service import AudioService
 from services.video_service import VideoService
 from services.file_service import FileService
 from services.task_service import TaskService, TaskType, TaskPriority, TaskStatus
-import mimetypes
 from datetime import datetime
 import json
 
@@ -44,15 +44,76 @@ except Exception as e:
 
 logger = logging.getLogger(__name__)
 
-# 从环境变量获取用户凭据
+def _is_safe_account_name(username: str) -> bool:
+    """Return whether an account name is safe to use as a directory name."""
+    return bool(
+        username
+        and username == username.strip()
+        and username not in {".", ".."}
+        and "/" not in username
+        and "\\" not in username
+        and "\x00" not in username
+    )
 
-VALID_CREDENTIALS = {}
-for i in range(1, 11):  # 支持最多10个用户
-    username = os.getenv(f'USER_{i}_NAME')
-    password = os.getenv(f'USER_{i}_PASSWORD')
-    print(f"用户{i}：{username}")
-    if username and password:
-        VALID_CREDENTIALS[username] = password
+
+def load_credentials(environ=None):
+    """Load up to ten Gradio auth accounts without failing module imports."""
+    if environ is None:
+        environ = os.environ
+    credentials = {}
+    errors = []
+
+    for index in range(1, 11):
+        username = environ.get(f"USER_{index}_NAME")
+        password = environ.get(f"USER_{index}_PASSWORD")
+
+        if not username and not password:
+            continue
+        if not username or not password:
+            errors.append(f"USER_{index}_NAME and USER_{index}_PASSWORD must be configured together")
+            continue
+        if not _is_safe_account_name(username):
+            errors.append(f"USER_{index}_NAME is not safe for a storage namespace")
+            continue
+        if username in credentials:
+            errors.append(f"duplicate configured username: {username}")
+            continue
+
+        credentials[username] = password
+
+    return credentials, errors
+
+
+VALID_CREDENTIALS, CREDENTIAL_ERRORS = load_credentials()
+
+
+def validate_auth_configuration():
+    """Validate credentials only when the server is actually launched."""
+    if CREDENTIAL_ERRORS:
+        raise RuntimeError("Invalid authentication configuration: " + "; ".join(CREDENTIAL_ERRORS))
+    if not VALID_CREDENTIALS:
+        raise RuntimeError(
+            "No login account is configured. Set USER_1_NAME and USER_1_PASSWORD before starting HeyGemWeb."
+        )
+
+
+def require_username(request: gr.Request) -> str:
+    """Read the authenticated user supplied by Gradio's server-side auth."""
+    username = getattr(request, "username", None)
+    if not username or username not in VALID_CREDENTIALS:
+        raise gr.Error("Authentication required.")
+    return username
+
+
+def classify_video_status(status) -> str:
+    """Normalize status codes used by HeyGem-compatible video backends."""
+    if status == 1:
+        return "processing"
+    if status == 2:
+        return "completed"
+    if status in {0, 3}:
+        return "failed"
+    return "unknown"
 
 custom_css = """
 /* 隐藏 Gradio 页脚 */
@@ -318,37 +379,71 @@ class HeyGemApp:
         self.video_service = VideoService()
         self.file_service = FileService()
         self.task_service = TaskService()
-        self.current_user = None
-        self.is_logged_in = False
+        self.video_task_lock = threading.Lock()
+        self.video_task_db_path = BASE_DIR / "video_tasks.json"
+        self.video_task_owners = self._load_video_task_owners()
         
         # 启动任务队列服务
         self.task_service.start()
 
-    def login(self, username, password):
-        if username in VALID_CREDENTIALS and VALID_CREDENTIALS[username] == password:
-            self.is_logged_in = True
-            self.current_user = username
-            return True, "登录成功"
-        return False, "用户名或密码错误"
+    def get_owned_task(self, task_id: str, username: str):
+        """Return a task only when it belongs to the authenticated user."""
+        task = self.task_service.get_task(task_id)
+        if not isinstance(task, dict) or task.get("username") != username:
+            return None
+        return task
 
-    def _move_video_to_user_dir(self, video_filename):
+    def _load_video_task_owners(self):
+        if not self.video_task_db_path.is_file():
+            return {}
+        try:
+            with open(self.video_task_db_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            if not isinstance(payload, dict):
+                raise ValueError("video task registry must be a JSON object")
+            return {
+                str(task_id): username
+                for task_id, username in payload.items()
+                if isinstance(username, str) and username
+            }
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            logger.warning("无法读取视频任务归属记录: %s", exc)
+            return {}
+
+    def record_video_task_owner(self, task_id: str, username: str):
+        with self.video_task_lock:
+            self.video_task_owners[task_id] = username
+            temp_path = self.video_task_db_path.with_suffix(".tmp")
+            try:
+                with open(temp_path, "w", encoding="utf-8") as f:
+                    json.dump(self.video_task_owners, f, ensure_ascii=False, indent=2)
+                if os.name != "nt":
+                    os.chmod(temp_path, 0o600)
+                temp_path.replace(self.video_task_db_path)
+            except OSError as exc:
+                logger.warning("无法持久化视频任务归属记录: %s", exc)
+
+    def _move_video_to_user_dir(self, video_filename, username):
         """移动视频文件到用户目录"""
         try:
-            # 如果video_filename是完整路径，只取文件名部分
-            if video_filename.startswith('/'):
-                video_filename = Path(video_filename).name
-                
-            source_path = UPLOAD_DIR / video_filename
-            logger.info(f"UPLOAD_DIR: {UPLOAD_DIR}")
-            logger.info(f"video_filename: {video_filename}")
-            logger.info(f"完整源文件路径: {source_path}")
-            logger.info(f"源文件是否存在: {source_path.exists()}")
-            
-            if not source_path.exists():
-                return False, f"视频文件不存在: {source_path}", None
-                
-            user_dir = self.file_service.get_user_dir(self.current_user)
-            target_path = user_dir / video_filename
+            if not isinstance(video_filename, str) or not video_filename.strip():
+                return False, "视频服务未返回结果文件", None
+
+            safe_filename = Path(video_filename.replace("\\", "/")).name
+            if not safe_filename or Path(safe_filename).suffix.lower() != ".mp4":
+                return False, "视频服务返回了无效的结果文件", None
+
+            user_dir = self.file_service.get_user_dir(username)
+            target_path = user_dir / safe_filename
+
+            if target_path.is_file():
+                return True, f"视频已保存到: {target_path}", target_path
+
+            source_candidates = [UPLOAD_DIR / safe_filename, OUTPUT_DIR / safe_filename]
+            source_path = next((path for path in source_candidates if path.is_file()), None)
+            if source_path is None:
+                return False, f"视频文件不存在: {safe_filename}", None
+
             source_path.rename(target_path)
             return True, f"视频已保存到: {target_path}", target_path
             
@@ -356,11 +451,12 @@ class HeyGemApp:
             logger.error(f"移动视频文件失败: {str(e)}")
             return False, f"移动视频文件失败: {str(e)}", None
 
-    def _cleanup_temp_images(self):
+    def _cleanup_temp_images(self, username):
         """清理临时图片文件"""
         try:
             cleaned_files = []
-            for temp_file in UPLOAD_DIR.glob("*.png"):
+            user_dir = self.file_service.get_user_dir(username)
+            for temp_file in user_dir.glob("*.png"):
                 if temp_file.name.replace(".png", "").isdigit():
                     temp_file.unlink()
                     cleaned_files.append(temp_file.name)
@@ -375,19 +471,9 @@ class HeyGemApp:
             return False, f"清理临时文件失败: {str(e)}"
 
     def create_interface(self):
-        with gr.Blocks(title="HeyGem数字人", css=custom_css) as demo:
-            login_state = gr.State(value=False)
-            current_user_state = gr.State(value=None)
+        with gr.Blocks(title="HeyGem数字人") as demo:
             theme_state = gr.State(value="light")
-            # 登录区
-            with gr.Group(visible=True) as login_group:
-                gr.Markdown("# HeyGem数字人登录")
-                username = gr.Textbox(label="用户名", placeholder="请输入用户名")
-                password = gr.Textbox(label="密码", placeholder="请输入密码", type="password")
-                login_btn = gr.Button("登录")
-                login_status = gr.Textbox(label="登录状态", interactive=False)
-            # 主界面区
-            with gr.Group(visible=False) as main_group:
+            with gr.Group():
                 with gr.Row():
                     gr.Markdown("# HeyGem数字人界面")
                     with gr.Column(scale=1, min_width=100):
@@ -427,12 +513,10 @@ class HeyGemApp:
                 with gr.Tab("模型训练"):
                     with gr.Row():
                         with gr.Column():
-                            video_input = gr.File(label="上传视频")
+                            video_input = gr.File(label="上传视频", file_types=[".mp4"], type="filepath")
                             model_name = gr.Textbox(label="模特名称", placeholder="请输入模特名称")
                             train_btn = gr.Button("开始训练")
                             train_output = gr.Textbox(label="训练状态", lines=5)
-                            reference_audio = gr.Textbox(label="参考音频URL", visible=False)
-                            reference_text = gr.Textbox(label="参考文本", visible=False)
                 with gr.Tab("视频生成"):
                     with gr.Row():
                         with gr.Column():
@@ -444,12 +528,6 @@ class HeyGemApp:
                             text_input = gr.Textbox(label="要合成的文本", lines=3)
                             generate_btn = gr.Button("生成视频")
                             task_id_output = gr.Textbox(label="任务ID")
-                            
-                            # 添加进度条
-                            with gr.Row():
-                                progress_bar = gr.Progress()
-                                auto_refresh = gr.Checkbox(label="自动刷新状态", value=True)
-                            
                             check_status_btn = gr.Button("检查状态")
                             status_output = gr.Textbox(label="状态", lines=3)
                             
@@ -459,7 +537,7 @@ class HeyGemApp:
                             1. 输入模特名称（在"我的数字模特"中可以查看）
                             2. 输入要合成的文本
                             3. 点击"生成视频"按钮开始任务
-                            4. 系统会自动更新进度，也可以手动点击"检查状态"
+                            4. 点击"检查状态"查询后端任务进度
                             5. 任务完成后，可以在"我的作品"中查看生成的视频
                             
                             > **提示**：生成视频可能需要几分钟时间，请耐心等待
@@ -505,7 +583,6 @@ class HeyGemApp:
                             ### 任务队列
                             - 查看所有任务的状态和进度
                             - 取消等待中的任务
-                            - 设置最大并发任务数
                             
                             ## 常见问题
                             
@@ -549,17 +626,6 @@ class HeyGemApp:
                             gr.Markdown("### 任务队列状态")
                             queue_status = gr.JSON(label="队列状态")
                             refresh_queue_btn = gr.Button("刷新队列状态")
-                            
-                            gr.Markdown("### 并发设置")
-                            with gr.Row():
-                                concurrent_tasks = gr.Slider(
-                                    label="最大并发任务数",
-                                    minimum=1,
-                                    maximum=10,
-                                    step=1,
-                                    value=2
-                                )
-                                set_concurrent_btn = gr.Button("设置")
                                 
                         with gr.Column(scale=3):
                             gr.Markdown("### 我的任务")
@@ -567,7 +633,7 @@ class HeyGemApp:
                                 headers=["任务ID", "类型", "状态", "进度", "创建时间", "操作"],
                                 datatype=["str", "str", "str", "number", "str", "str"],
                                 row_count=10,
-                                col_count=(6, "fixed"),
+                                column_count=(6, "fixed"),
                                 interactive=False
                             )
                             refresh_tasks_btn = gr.Button("刷新我的任务")
@@ -579,14 +645,13 @@ class HeyGemApp:
                             task_details = gr.JSON(label="任务详情")
                             get_task_btn = gr.Button("获取任务详情")
                 # --- 任务队列逻辑 ---
-                def get_queue_status():
+                def get_queue_status(request: gr.Request):
+                    require_username(request)
                     return self.task_service.get_queue_status()
                 
-                def get_user_tasks():
-                    if not self.current_user:
-                        return []
-                    
-                    tasks = self.task_service.get_user_tasks(self.current_user)
+                def get_user_tasks(request: gr.Request):
+                    username = require_username(request)
+                    tasks = self.task_service.get_user_tasks(username)
                     # 格式化为表格显示
                     rows = []
                     for task in tasks:
@@ -600,39 +665,37 @@ class HeyGemApp:
                     
                     return rows
                 
-                def get_task_details(task_id):
+                def get_task_details(task_id, request: gr.Request):
                     if not task_id:
                         return {"error": "请输入任务ID"}
-                    
-                    task = self.task_service.get_task(task_id)
+
+                    username = require_username(request)
+                    task = self.get_owned_task(task_id, username)
                     if not task:
                         return {"error": "未找到任务"}
-                    
+
                     return task
                 
-                def cancel_task(task_id):
+                def cancel_task(task_id, request: gr.Request):
                     if not task_id:
                         return {"error": "请输入任务ID"}
-                    
+
+                    username = require_username(request)
+                    task = self.get_owned_task(task_id, username)
+                    if not task:
+                        return {"error": "未找到任务"}
+
                     success = self.task_service.cancel_task(task_id)
                     if success:
                         return {"success": f"已取消任务 {task_id}"}
                     else:
                         return {"error": f"无法取消任务 {task_id}"}
                 
-                def set_max_concurrent_tasks(count):
-                    success = self.task_service.set_max_concurrent_tasks(int(count))
-                    if success:
-                        return {"success": f"已设置最大并发任务数为 {count}"}
-                    else:
-                        return {"error": "设置失败"}
-                
                 # 绑定任务队列相关事件
                 refresh_queue_btn.click(get_queue_status, None, queue_status)
                 refresh_tasks_btn.click(get_user_tasks, None, user_tasks)
                 get_task_btn.click(get_task_details, task_id_input, task_details)
                 cancel_task_btn.click(cancel_task, task_id_input, task_details)
-                set_concurrent_btn.click(set_max_concurrent_tasks, concurrent_tasks, queue_status)
                 
                 # 页面加载时自动刷新
                 demo.load(fn=get_queue_status, inputs=None, outputs=queue_status)
@@ -654,20 +717,23 @@ class HeyGemApp:
                 )
                 
                 # --- 我的作品逻辑 ---
-                def get_gallery_items():
-                    if not self.current_user:
-                        return []
-                    return [(w["path"], w["name"]) for w in self.get_works_info()]
-                def get_models_items():
-                    if not self.current_user:
-                        return []
-                    return [(m["path"], m["name"]) for m in self.get_models_info()]
-                def select_video(evt: gr.SelectData):
-                    works = self.get_works_info()
+                def get_gallery_items(request: gr.Request):
+                    username = require_username(request)
+                    return [(w["path"], w["name"]) for w in self.get_works_info(username)]
+
+                def get_models_items(request: gr.Request):
+                    username = require_username(request)
+                    return [(m["path"], m["name"]) for m in self.get_models_info(username)]
+
+                def select_video(evt: gr.SelectData, request: gr.Request):
+                    username = require_username(request)
+                    works = self.get_works_info(username)
                     selected = works[evt.index]
                     return selected["path"]
-                def select_model(evt: gr.SelectData):
-                    models = self.get_models_info()
+
+                def select_model(evt: gr.SelectData, request: gr.Request):
+                    username = require_username(request)
+                    models = self.get_models_info(username)
                     selected = models[evt.index]
                     return selected["path"]
                 works_gallery.select(select_video, outputs=selected_video)
@@ -676,98 +742,78 @@ class HeyGemApp:
                 refresh_models_btn.click(get_models_items, None, models_gallery)
                 demo.load(fn=get_gallery_items, inputs=None, outputs=works_gallery)
                 demo.load(fn=get_models_items, inputs=None, outputs=models_gallery)
-                def on_training_complete(result):
-                    if "参考音频:" in result and "参考文本:" in result:
-                        ref_audio = result.split("参考音频:")[1].split("\n")[0].strip()
-                        ref_text = result.split("参考文本:")[1].strip()
-                        return result, ref_audio, ref_text
-                    return result, "", ""
+                def start_training(video_file, model_name, request: gr.Request):
+                    return self.train_model(video_file, model_name, require_username(request))
+
                 train_btn.click(
-                    fn=lambda video_file, model_name: self.train_model(video_file, model_name),
+                    fn=start_training,
                     inputs=[video_input, model_name],
                     outputs=[train_output]
-                ).then(
-                    fn=on_training_complete,
-                    inputs=[train_output],
-                    outputs=[train_output, reference_audio, reference_text]
-                ).then(
-                    fn=get_models_items,
-                    inputs=None,
-                    outputs=models_gallery
                 )
-                def generate_video(video_path, text):
+                def generate_video(video_path, text, request: gr.Request):
                     if not video_path:
                         return "错误: 请先选择数字人模特", None
                     if not text:
                         return "错误: 请输入要合成的文本", None
-                    
+
+                    username = require_username(request)
                     try:
-                        # 获取模型训练结果
-                        model_result = self.get_model_training_result(video_path)
+                        model_path = self.resolve_model_path(video_path, username)
+                        model_result = self.get_model_training_result(model_path.stem, username)
                         if not model_result:
                             return "错误: 未找到模型训练结果", None
-                        
-                        # 合成音频
-                        audio_task_id, audio_msg = self.synthesize_audio(
+
+                        audio_path = self.audio_service.synthesize_audio(
                             text=text,
                             reference_text=model_result.get("reference_audio_text", ""),
-                            reference_audio=model_result.get("asr_format_audio_url", "")
+                            reference_audio=model_result.get("asr_format_audio_url", ""),
+                            username=username,
                         )
-                        
-                        if not audio_task_id:
-                            return audio_msg, None
-                        
-                        return f"音频合成任务已创建，任务ID: {audio_task_id}\n请在任务队列中查看进度。", audio_task_id
+
+                        task_id = self.video_service.make_video(
+                            video_path=model_path,
+                            audio_path=Path(audio_path),
+                            username=username,
+                        )
+                        self.record_video_task_owner(task_id, username)
+
+                        return "视频任务已提交。请点击“检查状态”查询进度。", task_id
                     except Exception as e:
                         logger.error(f"生成视频失败: {str(e)}")
                         return f"生成视频失败: {str(e)}", None
 
-                def check_status(task_id):
+                def check_status(task_id, request: gr.Request):
                     if not task_id:
                         return "请先生成视频获取任务ID"
-                    
-                    task = self.task_service.get_task(task_id)
-                    if not task:
+
+                    username = require_username(request)
+                    with self.video_task_lock:
+                        owner = self.video_task_owners.get(task_id)
+                    if owner != username:
                         return f"未找到任务: {task_id}"
-                    
-                    status = task["status"]
-                    progress = task["progress"]
-                    
-                    # 更新进度条
-                    if progress > 0:
-                        progress_bar.update(progress / 100)
-                    
-                    if status == TaskStatus.COMPLETED:
-                        result = task["result"]
-                        if task["task_type"] == TaskType.AUDIO_SYNTHESIS:
-                            # 音频合成完成，开始视频生成
-                            audio_path = result.get("audio_path")
-                            video_task_id, video_msg = self.make_video(
-                                video_path=video_path_input.value,
-                                audio_path=audio_path
-                            )
-                            return f"✅ 音频合成已完成，开始生成视频。\n视频任务ID: {video_task_id}"
-                        elif task["task_type"] == TaskType.VIDEO_GENERATION:
-                            # 视频生成完成
-                            video_path = result.get("video_path")
-                            return f"🎉 视频生成已完成！\n视频保存路径: {video_path}\n请在'我的作品'中查看。"
-                    elif status == TaskStatus.FAILED:
-                        return f"❌ 任务失败: {task['error']}\n请检查输入参数或联系管理员。"
-                    elif status == TaskStatus.CANCELLED:
-                        return "⚠️ 任务已取消"
-                    else:
-                        return f"⏳ 任务状态: {status}, 进度: {progress}%\n请耐心等待..."
-                
-                # 自动刷新状态
-                def auto_refresh_status():
-                    task_id = task_id_output.value
-                    if task_id and auto_refresh.value:
-                        status = check_status(task_id)
-                        return status
-                    return status_output.value
-                
-                # 自动刷新状态（移除every参数，因为新版本Gradio不支持）
-                demo.load(fn=auto_refresh_status, inputs=None, outputs=status_output)
+
+                    try:
+                        status_data = self.video_service.check_status(task_id)
+                        if status_data.get("code") != 10000 or status_data.get("success") is False:
+                            return f"状态查询失败: {status_data}"
+
+                        data = status_data.get("data", {})
+                        status = data.get("status")
+                        status_kind = classify_video_status(status)
+                        if status_kind == "processing":
+                            return f"⏳ 处理中，进度: {data.get('progress', 0)}%"
+                        if status_kind == "completed":
+                            success, message, _ = self._move_video_to_user_dir(data.get("result", ""), username)
+                            if success:
+                                self._cleanup_temp_images(username)
+                                return f"🎉 {message}"
+                            return message
+                        if status_kind == "failed":
+                            return f"❌ 任务失败: {data.get('msg', 'unknown error')}"
+                        return f"状态未知: {status_data}"
+                    except Exception as e:
+                        logger.error(f"状态检查失败: {str(e)}")
+                        return f"状态检查失败: {str(e)}"
                 
                 generate_btn.click(
                     fn=generate_video,
@@ -779,32 +825,35 @@ class HeyGemApp:
                     inputs=[task_id_output],
                     outputs=[status_output]
                 )
+
+                def start_cleanup(days, request: gr.Request):
+                    return self.cleanup_files(days, require_username(request))
+
                 cleanup_btn.click(
-                    fn=lambda days: self.cleanup_files(days),
+                    fn=start_cleanup,
                     inputs=[days_input],
                     outputs=[cleanup_output]
                 )
 
                 # --- 帮助与反馈逻辑 ---
-                def submit_feedback(feedback_type, content, email):
+                def submit_feedback(feedback_type, content, email, request: gr.Request):
                     if not content:
                         return "❌ 请输入反馈内容"
-                    
+
+                    username = require_username(request)
                     try:
-                        # 记录反馈到日志
-                        logger.info(f"用户反馈: 类型={feedback_type}, 邮箱={email}, 内容={content}")
-                        
-                        # 保存反馈到文件
-                        feedback_dir = Path("feedback")
-                        feedback_dir.mkdir(exist_ok=True)
-                        
-                        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+                        logger.info("收到用户反馈: 类型=%s, 用户=%s", feedback_type, username)
+
+                        feedback_dir = self.file_service.get_user_dir(username) / "feedback"
+                        feedback_dir.mkdir(parents=True, exist_ok=True)
+
+                        timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
                         feedback_file = feedback_dir / f"feedback_{timestamp}.txt"
-                        
+
                         with open(feedback_file, "w", encoding="utf-8") as f:
                             f.write(f"类型: {feedback_type}\n")
                             f.write(f"时间: {datetime.now().isoformat()}\n")
-                            f.write(f"用户: {self.current_user}\n")
+                            f.write(f"用户: {username}\n")
                             if email:
                                 f.write(f"邮箱: {email}\n")
                             f.write(f"内容:\n{content}\n")
@@ -819,142 +868,103 @@ class HeyGemApp:
                     inputs=[feedback_type, feedback_content, feedback_email],
                     outputs=feedback_status
                 )
-            def on_login(username, password):
-                success, msg = self.login(username, password)
-                if success:
-                    return True, gr.update(visible=False), gr.update(visible=True), username, "登录成功"
-                # 登录失败，主界面不显示，提示错误
-                return False, gr.update(visible=True), gr.update(visible=False), None, msg
-            login_btn.click(
-                fn=on_login,
-                inputs=[username, password],
-                outputs=[login_state, login_group, main_group, current_user_state, login_status]
-            )
         return demo
 
-    def train_model(self, video_file, model_name):
-        """训练模型"""
+    @staticmethod
+    def _validate_model_name(model_name: str) -> str:
+        model_name = str(model_name or "")
+        if (
+            not model_name
+            or model_name != model_name.strip()
+            or model_name in {".", ".."}
+            or "/" in model_name
+            or "\\" in model_name
+            or "\x00" in model_name
+            or len(model_name) > 100
+        ):
+            raise ValueError("模特名称不能为空，且不能包含路径字符或超过100个字符")
+        return model_name
+
+    def resolve_model_path(self, model_value, username: str) -> Path:
+        """Resolve a selected model without allowing access outside its user directory."""
+        user_dir = self.file_service.get_user_dir(username).resolve()
+        raw_value = str(model_value or "")
+        if not raw_value:
+            raise ValueError("请选择数字人模特")
+
+        candidate = Path(raw_value)
+        if candidate.is_absolute():
+            resolved = candidate.resolve()
+        else:
+            if "/" in raw_value or "\\" in raw_value or candidate.name != raw_value:
+                raise ValueError("模特路径不安全")
+            filename = candidate.name if candidate.suffix else f"{candidate.name}.mp4"
+            resolved = (user_dir / filename).resolve()
+
+        if resolved.parent != user_dir or resolved.suffix.lower() != ".mp4":
+            raise ValueError("模特路径不安全")
+        if not resolved.is_file():
+            raise ValueError(f"模特不存在: {resolved.name}")
+        return resolved
+
+    def train_model(self, video_file, model_name, username: str):
+        """Create a background task that calls the configured TTS preprocessing API."""
         try:
-            if not video_file or not model_name:
-                return "错误：请提供视频文件和模特名称"
-            
-            # 保存上传的视频文件
-            file_path = self.file_service.save_uploaded_file(video_file, video_file.name, self.current_user)
-            
-            # 创建训练任务
-            params = {
-                "video_path": str(file_path),
-                "model_name": model_name
-            }
-            
+            if not video_file:
+                return "错误：请提供MP4视频文件"
+
+            model_name = self._validate_model_name(model_name)
+            user_dir = self.file_service.get_user_dir(username)
+            model_path = user_dir / f"{model_name}.mp4"
+            result_file = user_dir / f"{model_name}_training.json"
+            if model_path.exists() or result_file.exists():
+                return f"错误：模特名称已存在: {model_name}"
+
+            uploaded_path = self.file_service.save_uploaded_file(
+                video_file,
+                Path(getattr(video_file, "name", video_file)).name,
+                username,
+            )
+            params = {"video_path": str(uploaded_path), "model_name": model_name}
+
             def train_model_task(task):
-                # 这里是实际的训练逻辑
-                # 在实际应用中，这里应该调用模型训练API
-                logger.info(f"开始训练模型: {model_name}")
-                time.sleep(5)  # 模拟训练过程
-                
-                # 返回训练结果
+                logger.info("开始训练语音参考数据: 用户=%s, 模特=%s", username, model_name)
+                audio_path = self.file_service.get_audio_path(uploaded_path, username)
+                if not self.audio_service.extract_audio(uploaded_path, audio_path):
+                    raise RuntimeError("从视频中提取音频失败")
+
+                training_result = self.audio_service.train_voice_model(audio_path)
+                if not training_result:
+                    raise RuntimeError("TTS预处理服务未返回训练结果")
+
+                uploaded_path.rename(model_path)
+                with open(result_file, "w", encoding="utf-8") as f:
+                    json.dump(training_result, f, ensure_ascii=False, indent=2)
+
                 return {
                     "model_name": model_name,
-                    "reference_audio": f"https://example.com/audio/{model_name}.wav",
-                    "reference_text": "这是一段参考文本，用于测试语音合成效果。"
+                    "video_path": str(model_path),
+                    "audio_path": str(audio_path),
+                    "reference_audio": training_result.get("asr_format_audio_url"),
+                    "reference_text": training_result.get("reference_audio_text"),
                 }
-            
+
             task_id = self.task_service.create_task(
                 task_type=TaskType.MODEL_TRAINING,
                 params=params,
-                username=self.current_user,
+                username=username,
                 priority=TaskPriority.HIGH,
-                callback=train_model_task
+                callback=train_model_task,
             )
-            
-            return f"已创建训练任务，任务ID: {task_id}\n请在任务队列中查看进度。"
-            
+            return f"已创建训练任务，任务ID: {task_id}\n请在任务队列中查看结果。"
         except Exception as e:
             logger.error(f"训练模型失败: {str(e)}")
             return f"训练失败: {str(e)}"
 
-    def get_uploaded_videos(self):
-        return self.file_service.scan_uploaded_videos(self.current_user)
+    def get_uploaded_videos(self, username: str):
+        return self.file_service.scan_uploaded_videos(username)
 
-    def synthesize_audio(self, text, reference_text, reference_audio, username=None):
-        """合成音频"""
-        try:
-            if not text:
-                return None, "错误：请输入要合成的文本"
-            
-            # 创建音频合成任务
-            params = {
-                "text": text,
-                "reference_text": reference_text,
-                "reference_audio": reference_audio
-            }
-            
-            def synthesize_audio_task(task):
-                # 这里是实际的音频合成逻辑
-                logger.info(f"开始合成音频，文本长度: {len(text)}")
-                time.sleep(3)  # 模拟合成过程
-                
-                # 返回合成结果
-                return {
-                    "audio_path": f"/tmp/audio_{uuid.uuid4()}.wav",
-                    "duration": len(text) * 0.1  # 模拟音频时长
-                }
-            
-            task_id = self.task_service.create_task(
-                task_type=TaskType.AUDIO_SYNTHESIS,
-                params=params,
-                username=username or self.current_user,
-                priority=TaskPriority.NORMAL,
-                callback=synthesize_audio_task
-            )
-            
-            return task_id, f"已创建音频合成任务，任务ID: {task_id}"
-            
-        except Exception as e:
-            logger.error(f"音频合成失败: {str(e)}")
-            return None, f"音频合成失败: {str(e)}"
-
-    def make_video(self, video_path, audio_path):
-        """生成视频"""
-        try:
-            if not video_path or not audio_path:
-                return None, "错误：请提供视频路径和音频路径"
-            
-            # 创建视频生成任务
-            params = {
-                "video_path": video_path,
-                "audio_path": audio_path
-            }
-            
-            def make_video_task(task):
-                # 这里是实际的视频生成逻辑
-                logger.info(f"开始生成视频: {video_path}")
-                time.sleep(10)  # 模拟视频生成过程
-                
-                # 生成结果视频路径
-                result_video = f"{video_path.rsplit('.', 1)[0]}-r.mp4"
-                
-                # 返回生成结果
-                return {
-                    "video_path": result_video
-                }
-            
-            task_id = self.task_service.create_task(
-                task_type=TaskType.VIDEO_GENERATION,
-                params=params,
-                username=self.current_user,
-                priority=TaskPriority.NORMAL,
-                callback=make_video_task
-            )
-            
-            return task_id, f"已创建视频生成任务，任务ID: {task_id}"
-            
-        except Exception as e:
-            logger.error(f"视频生成失败: {str(e)}")
-            return None, f"视频生成失败: {str(e)}"
-
-    def cleanup_files(self, days_old: int) -> str:
+    def cleanup_files(self, days_old: int, username: str) -> str:
         """清理临时文件"""
         try:
             if days_old < 1:
@@ -966,24 +976,17 @@ class HeyGemApp:
             }
             
             def cleanup_files_task(task):
-                # 这里是实际的文件清理逻辑
-                logger.info(f"开始清理 {days_old} 天前的文件")
-                
-                # 调用文件服务的清理方法
-                result = self.file_service.cleanup_temp_files(days_old, self.current_user)
-                
-                # 更新任务进度
+                logger.info("开始清理用户文件: 用户=%s, 天数=%s", username, days_old)
+                result = self.file_service.cleanup_temp_files(days_old, username)
                 self.task_service.update_task_progress(task.task_id, 50)
-                
-                # 返回清理结果
                 return result
             
             task_id = self.task_service.create_task(
                 task_type=TaskType.FILE_CLEANUP,
                 params=params,
-                username=self.current_user,
+                username=username,
                 priority=TaskPriority.LOW,
-                callback=cleanup_files_task
+                callback=cleanup_files_task,
             )
             
             return f"已创建文件清理任务，任务ID: {task_id}\n请在任务队列中查看进度。"
@@ -992,14 +995,12 @@ class HeyGemApp:
             logger.error(f"文件清理失败: {str(e)}")
             return f"文件清理失败: {str(e)}"
 
-    def get_works(self):
-        return self.file_service.scan_works(self.current_user)
+    def get_works(self, username: str):
+        return self.file_service.scan_works(username)
 
-    def get_works_info(self):
-        if not self.current_user:
-            return []
+    def get_works_info(self, username: str):
         works = []
-        for file in self.file_service.scan_works(self.current_user):
+        for file in self.file_service.scan_works(username):
             file_path = Path(file["path"]) if isinstance(file, dict) else Path(file)
             works.append({
                 "name": file_path.stem,
@@ -1009,11 +1010,9 @@ class HeyGemApp:
             })
         return works
 
-    def get_models_info(self):
-        if not self.current_user:
-            return []
+    def get_models_info(self, username: str):
         models = []
-        for file in self.file_service.scan_models(self.current_user):
+        for file in self.file_service.scan_models(username):
             file_path = Path(file["path"])
             models.append({
                 "name": file_path.stem,
@@ -1022,9 +1021,10 @@ class HeyGemApp:
             })
         return models
 
-    def get_model_training_result(self, model_name):
+    def get_model_training_result(self, model_name, username: str):
         try:
-            user_dir = self.file_service.get_user_dir(self.current_user)
+            model_name = self._validate_model_name(model_name)
+            user_dir = self.file_service.get_user_dir(username)
             result_file = user_dir / f"{model_name}_training.json"
             if result_file.exists():
                 with open(result_file, 'r', encoding='utf-8') as f:
@@ -1038,6 +1038,8 @@ def main():
     try:
         print("开始启动HeyGem Web界面...")
         logger.info("启动HeyGem Web界面")
+
+        validate_auth_configuration()
         
         print("创建HeyGemApp实例...")
         app = HeyGemApp()
@@ -1050,13 +1052,17 @@ def main():
             server_name=SERVER_HOST,
             server_port=SERVER_PORT,
             share=False,
-            favicon_path=None
+            favicon_path=None,
+            css=custom_css,
+            auth=list(VALID_CREDENTIALS.items()),
+            auth_message="请使用管理员在环境变量中配置的 HeyGemWeb 账号登录。",
         )
     except Exception as e:
         print(f"程序启动失败: {str(e)}")
         logger.error(f"程序启动失败: {str(e)}")
         import traceback
         traceback.print_exc()
+        raise
     finally:
         # 确保停止任务队列服务
         if 'app' in locals() and hasattr(app, 'task_service'):
