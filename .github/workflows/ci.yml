@@ -17,12 +17,13 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      HEYGEM_BASE_DIR: ${{ runner.temp }}/heygem-data
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Configure CI data directory
+        run: echo "HEYGEM_BASE_DIR=$RUNNER_TEMP/heygem-data" >> "$GITHUB_ENV"
 
       - name: Set up Python 3.10
         uses: actions/setup-python@v5
