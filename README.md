@@ -109,7 +109,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 - Backend compatibility depends on the separately deployed services and their API behavior.
 - CI uses mocks and smoke checks; it does not execute end-to-end TTS/video generation, real FFmpeg, GPU, large-file, or browser workflows.
 - Multi-user isolation and concurrency behavior need additional security and load testing.
-- `deploy.sh` and `manage.sh` are retained as legacy helpers and should be reviewed for your distribution before production use.
+- Start the current app with `python app.py` after configuring `.env`. The legacy `deploy.sh` and `manage.sh` scripts still target `app:demo.server`, which the current app does not export.
 
 ## License and project relationship
 

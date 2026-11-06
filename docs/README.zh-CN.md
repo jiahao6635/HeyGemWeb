@@ -105,7 +105,7 @@ bash -n deploy.sh manage.sh
 - 后端兼容性取决于单独部署服务的 API 行为。
 - CI 使用 mock 和冒烟检查，不执行端到端 TTS/视频生成、真实 FFmpeg、GPU、大文件或浏览器工作流。
 - 多用户隔离与并发仍需要更多安全和负载测试。
-- `deploy.sh` 和 `manage.sh` 是保留的旧版辅助脚本，生产使用前必须针对具体发行版重新审查。
+- 配置好 `.env` 后，请用 `python app.py` 启动。旧版脚本 `deploy.sh` 和 `manage.sh` 仍指向 `app:demo.server`，当前应用没有导出该入口。
 
 ## 许可证与项目关系
 
